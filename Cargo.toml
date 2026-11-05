@@ -3,6 +3,9 @@ name = "thermal-eye"
 version = "0.1.0"
 edition = "2024"
 description = "A compact Windows desktop widget for system temperatures and usage"
+license = "MIT"
+authors = ["Dominique Bastenie"]
+repository = "https://github.com/H3katonkheir/thermal-eye"
 
 [dependencies]
 eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts"] }
@@ -31,3 +34,6 @@ lto = "thin"
 codegen-units = 4
 strip = true
 panic = "abort"
+
+[build-dependencies]
+winresource = "0.1"

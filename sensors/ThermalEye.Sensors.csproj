@@ -15,6 +15,11 @@
     <TieredPGO>false</TieredPGO>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
+    <ApplicationIcon>../assets/icon.ico</ApplicationIcon>
+    <Version>0.1.0</Version>
+    <Product>Thermal Eye</Product>
+    <AssemblyTitle>Thermal Eye sensors</AssemblyTitle>
+    <Copyright>Copyright (c) 2026 Dominique Bastenie</Copyright>
   </PropertyGroup>
   <ItemGroup>
     <!-- The default budget follows L3 size, which costs ~100 MB on X3D parts. -->

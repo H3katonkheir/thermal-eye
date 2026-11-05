@@ -306,6 +306,16 @@ fn temperatures_use_a_plain_degree_sign() {
 }
 
 #[test]
+fn bundled_images_decode_with_the_expected_shape() {
+    let mark = logo::decode(logo::MARK);
+    assert!(mark.width > mark.height, "the title bar mark is wide");
+    assert!(mark.rgba.chunks_exact(4).any(|pixel| pixel[3] == 0), "the mark has no background");
+
+    let icon = logo::decode(logo::ICON);
+    assert_eq!((icon.width, icon.height), (256, 256));
+}
+
+#[test]
 fn elide_keeps_short_text_and_marks_cuts() {
     assert_eq!(elide("short", 10), "short");
     assert_eq!(elide("a very long drive name", 8), "a very…");

@@ -12,5 +12,5 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 # Pulled in by a dependency, used only on Linux.
 Remove-Item dist\*MonoPosixHelper.dll -ErrorAction SilentlyContinue
 
-Copy-Item target\release\thermal-eye.exe dist\ -Force
+Copy-Item target\release\thermal-eye.exe, LICENSE, THIRD-PARTY-NOTICES.md dist\ -Force
 Get-ChildItem dist | Select-Object Name, @{ n = 'MB'; e = { [math]::Round($_.Length / 1MB, 1) } }

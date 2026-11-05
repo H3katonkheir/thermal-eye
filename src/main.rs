@@ -15,7 +15,7 @@ mod window;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use eframe::egui::{IconData, ViewportBuilder};
+use eframe::egui::ViewportBuilder;
 
 use app::{INITIAL_HEIGHT, COMPACT_WIDTH, ThermalEye, WIDTH};
 use config::Config;
@@ -37,8 +37,7 @@ fn main() -> eframe::Result {
     }
 
     let config = Config::load();
-    let (size, rgba) = logo::pixels();
-    let icon = IconData { rgba, width: size as u32, height: size as u32 };
+    let icon = logo::decode(logo::ICON);
     let width = if config.compact { COMPACT_WIDTH } else { WIDTH };
 
     let mut viewport = ViewportBuilder::default()

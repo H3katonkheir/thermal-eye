@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{
     self, Align2, Color32, ColorImage, Context, Rect, ScrollArea, Sense, Stroke, StrokeKind,
-    TextureHandle, TextureOptions, Ui, Vec2, ViewportCommand, WindowLevel, pos2, vec2,
+    TextureFilter, TextureHandle, TextureOptions, Ui, Vec2, ViewportCommand, WindowLevel, pos2, vec2,
 };
 
 use crate::bridge::Command;
@@ -95,15 +95,18 @@ pub struct ThermalEye {
 
 impl ThermalEye {
     pub fn new(ctx: &Context, monitor: Arc<Mutex<Monitor>>, commands: Sender<Command>, config: Config) -> Self {
-        let (size, pixels) = logo::pixels();
-        let image = ColorImage::from_rgba_unmultiplied([size, size], &pixels);
+        let mark = logo::decode(logo::MARK);
+        let size = [mark.width as usize, mark.height as usize];
+        let image = ColorImage::from_rgba_unmultiplied(size, &mark.rgba);
+        // Mipmaps: the mark is drawn far smaller than it is stored.
+        let filtering = TextureOptions::LINEAR.with_mipmap_mode(Some(TextureFilter::Linear));
         Self {
             monitor,
             commands,
             saved: config.clone(),
             config,
             last_save: Instant::now(),
-            logo: ctx.load_texture("logo", image, TextureOptions::LINEAR),
+            logo: ctx.load_texture("logo", image, filtering),
             settings_open: false,
             requested_size: Vec2::ZERO,
         }
@@ -244,8 +247,9 @@ impl ThermalEye {
 
         let painter = ui.painter();
         painter.rect_filled(rect, 0.0, TITLE_BG);
-        let mark = if compact { 22.0 } else { 26.0 };
-        let mark_rect = Rect::from_center_size(pos2(rect.left() + PAD + mark / 2.0, rect.center().y), Vec2::splat(mark));
+        let mark_height = if compact { 21.0 } else { 26.0 };
+        let mark = vec2(mark_height * self.logo.aspect_ratio(), mark_height);
+        let mark_rect = Rect::from_min_size(pos2(rect.left() + PAD, rect.center().y - mark.y / 2.0), mark);
         let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
         painter.image(self.logo.id(), mark_rect, uv, Color32::WHITE);
         let text_pos = pos2(mark_rect.right() + 10.0, rect.center().y);

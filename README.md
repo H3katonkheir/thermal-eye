@@ -111,3 +111,11 @@ elevated prompt and replay it:
 ```
 
 `thermal-eye-sensors.exe --dump sensors.txt` lists everything the library can see.
+
+The icons in `assets/` are generated from `assets/logo-source.webp` by
+`tools/make_icons.py`.
+
+## Licence
+
+MIT, see [LICENSE](LICENSE). Bundled components keep their own licences, listed in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

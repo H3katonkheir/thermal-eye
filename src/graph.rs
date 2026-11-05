@@ -19,6 +19,7 @@ const RIGHT_AXIS: f32 = 36.0;
 const BOTTOM_AXIS: f32 = 18.0;
 const SCALE_MAX: f32 = 100.0;
 const TOOLTIP_LINES: usize = 12;
+const USAGE_OPACITY: f32 = 0.5;
 
 fn to_screen(plot: Rect, index: usize, count: usize, value: f32) -> Pos2 {
     let x = index as f32 / (count.max(2) - 1) as f32;
@@ -74,16 +75,15 @@ pub fn draw(ui: &mut Ui, rect: Rect, lines: &[Line], seconds: u32, format_temp: 
 
     let line_painter = painter.with_clip_rect(plot.expand(2.0));
     for line in lines {
-        let stroke = Stroke::new(line.weight, line.color);
+        // Fainter rather than dashed: a dash pattern is laid along the line, so it
+        // would crawl over every peak each time the graph slides.
+        let color = if line.is_usage { line.color.gamma_multiply(USAGE_OPACITY) } else { line.color };
+        let stroke = Stroke::new(line.weight, color);
         let mut run: Vec<Pos2> = Vec::new();
         for (index, &value) in line.points.iter().chain(std::iter::once(&f32::NAN)).enumerate() {
             if value.is_nan() {
                 if run.len() > 1 {
-                    if line.is_usage {
-                        line_painter.extend(Shape::dashed_line(&run, stroke, 5.0, 3.0));
-                    } else {
-                        line_painter.add(Shape::line(std::mem::take(&mut run), stroke));
-                    }
+                    line_painter.add(Shape::line(std::mem::take(&mut run), stroke));
                 }
                 run.clear();
             } else {

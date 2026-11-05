@@ -129,6 +129,11 @@ impl ThermalEye {
         }
     }
 
+    /// In Live there is no span, so high and average would just repeat the reading.
+    fn is_live(&self) -> bool {
+        self.config.window_seconds == WINDOWS[0].1
+    }
+
     fn format_temp(fahrenheit: bool, celsius: f32) -> String {
         let value = if fahrenheit { celsius * 9.0 / 5.0 + 32.0 } else { celsius };
         format!("{value:.0}°")
@@ -388,19 +393,26 @@ impl ThermalEye {
 
         let painter = ui.painter();
         let at = |offset: f32| pos2(left + offset, y);
-        caps(painter, at(X_NOW), Align2::RIGHT_CENTER, "NOW", FAINT);
-        caps(painter, at(X_HIGH), Align2::RIGHT_CENTER, "HIGH", FAINT);
-        caps(painter, at(X_AVG), Align2::RIGHT_CENTER, "AVG", FAINT);
+        let live = self.is_live();
+        if live {
+            caps(painter, at(X_NOW), Align2::RIGHT_CENTER, "TEMP", FAINT);
+        } else {
+            caps(painter, at(X_NOW), Align2::RIGHT_CENTER, "NOW", FAINT);
+            caps(painter, at(X_HIGH), Align2::RIGHT_CENTER, "HIGH", FAINT);
+            caps(painter, at(X_AVG), Align2::RIGHT_CENTER, "AVG", FAINT);
+        }
         caps(painter, at(X_BAR_LEFT), Align2::LEFT_CENTER, "USAGE", FAINT);
         let span = ui.interact(
             Rect::from_min_max(pos2(left + X_RING, rect.top()), pos2(left + X_PERCENT, rect.bottom())),
             ui.scope_id().with("column-help"),
             Sense::hover(),
         );
-        span.on_hover_text(
+        span.on_hover_text(if live {
+            "TEMP: hottest sensor right now\nUSAGE: usage right now"
+        } else {
             "NOW: hottest sensor right now\nHIGH: hottest any sensor got in the selected span\n\
-             AVG: mean of the component's sensors over the span\nUSAGE: mean usage over the span",
-        );
+             AVG: mean of the component's sensors over the span\nUSAGE: mean usage over the span"
+        });
     }
 
     /// Bar and percentage for a usage series; a dash when there is none.
@@ -462,7 +474,7 @@ impl ThermalEye {
         }
         painter.text(pos2(left + X_NAME, y - 8.0), Align2::LEFT_CENTER, &component.title, strong(14.0), TEXT);
         let subtitle = elide(&component.subtitle, 30);
-        painter.text(pos2(left + X_NAME, y + 9.0), Align2::LEFT_CENTER, subtitle, body(11.0), FAINT);
+        let subtitle_rect = painter.text(pos2(left + X_NAME, y + 9.0), Align2::LEFT_CENTER, &subtitle, body(11.0), FAINT);
 
         let high = monitor.stats(component.high, seconds);
         let avg = monitor.stats(component.avg, seconds);
@@ -473,18 +485,21 @@ impl ThermalEye {
         }
         let now_color = high.now.map_or(FAINT, |v| heat_text(v, warn, critical));
         painter.text(pos2(left + X_NOW, y), Align2::RIGHT_CENTER, self.temp(high.now), strong(16.0), now_color);
-        let high_color = high.high.map_or(FAINT, |v| heat_text(v, warn, critical));
-        painter.text(pos2(left + X_HIGH, y), Align2::RIGHT_CENTER, self.temp(high.high), strong(13.5), high_color);
-        painter.text(pos2(left + X_AVG, y), Align2::RIGHT_CENTER, self.temp(avg.avg), body(13.5), MUTED);
+        if !self.is_live() {
+            let high_color = high.high.map_or(FAINT, |v| heat_text(v, warn, critical));
+            painter.text(pos2(left + X_HIGH, y), Align2::RIGHT_CENTER, self.temp(high.high), strong(13.5), high_color);
+            painter.text(pos2(left + X_AVG, y), Align2::RIGHT_CENTER, self.temp(avg.avg), body(13.5), MUTED);
+        }
 
         let usage = component.usage.and_then(|id| monitor.stats(id, seconds).avg);
         self.usage_cell(ui, rect, usage, 8.0, PURPLE);
         self.graph_dot(ui, rect, &component.key, component_color(component.kind));
+        show_full_text(ui, &response, subtitle_rect, &subtitle, &component.subtitle);
     }
 
     fn sensor_row(&mut self, ui: &mut Ui, width: f32, monitor: &Monitor, component: &Component, row: &Row, note: Option<&str>, die: bool) {
         let seconds = self.config.window_seconds;
-        let (rect, _) = ui.allocate_exact_size(vec2(width, SENSOR_H), Sense::hover());
+        let (rect, response) = ui.allocate_exact_size(vec2(width, SENSOR_H), Sense::hover());
         let left = rect.left() + PAD;
         let y = rect.center().y;
         let painter = ui.painter();
@@ -492,7 +507,8 @@ impl ThermalEye {
 
         let font = if die { strong(12.5) } else { body(12.5) };
         let color = if die { TEXT } else { MUTED };
-        let label = painter.text(pos2(left + X_NAME, y), Align2::LEFT_CENTER, elide(&row.label, 28), font, color);
+        let shown = elide(&row.label, 28);
+        let label = painter.text(pos2(left + X_NAME, y), Align2::LEFT_CENTER, &shown, font, color);
         if let Some(note) = note {
             let x = label.right() + 8.0;
             painter.text(pos2(x, y), Align2::LEFT_CENTER, note, body(11.0), FAINT);
@@ -502,8 +518,10 @@ impl ThermalEye {
         let (warn, critical) = (component.warn, component.critical);
         let tint = |value: Option<f32>| value.map_or(FAINT, |v| heat_text(v, warn, critical));
         painter.text(pos2(left + X_NOW, y), Align2::RIGHT_CENTER, self.temp(stats.now), strong(12.5), tint(stats.now));
-        painter.text(pos2(left + X_HIGH, y), Align2::RIGHT_CENTER, self.temp(stats.high), body(12.5), tint(stats.high));
-        painter.text(pos2(left + X_AVG, y), Align2::RIGHT_CENTER, self.temp(stats.avg), body(12.5), MUTED);
+        if !self.is_live() {
+            painter.text(pos2(left + X_HIGH, y), Align2::RIGHT_CENTER, self.temp(stats.high), body(12.5), tint(stats.high));
+            painter.text(pos2(left + X_AVG, y), Align2::RIGHT_CENTER, self.temp(stats.avg), body(12.5), MUTED);
+        }
 
         if let Some(usage) = row.usage {
             let value = monitor.stats(usage, seconds).avg;
@@ -511,6 +529,7 @@ impl ThermalEye {
         }
         let color = self.series_color(&row.key);
         self.graph_dot(ui, rect, &row.key, color);
+        show_full_text(ui, &response, label, &shown, &row.label);
     }
 
     fn core_head(&self, ui: &mut Ui, width: f32) {
@@ -522,7 +541,9 @@ impl ThermalEye {
         let at = |offset: f32| pos2(left + offset, y);
         caps(painter, at(X_NAME + 12.0), Align2::LEFT_CENTER, "CORE", FAINT);
         caps(painter, at(X_NOW), Align2::RIGHT_CENTER, "CLOCK", FAINT);
-        caps(painter, at(X_HIGH), Align2::RIGHT_CENTER, "PEAK", FAINT);
+        if !self.is_live() {
+            caps(painter, at(X_HIGH), Align2::RIGHT_CENTER, "PEAK", FAINT);
+        }
         caps(painter, at(X_AVG), Align2::RIGHT_CENTER, "POWER", FAINT);
     }
 
@@ -538,7 +559,9 @@ impl ThermalEye {
         let clock = core.clock.map(|id| monitor.stats(id, seconds)).unwrap_or(Stats::default());
         let power = core.power.and_then(|id| monitor.latest(id));
         painter.text(pos2(left + X_NOW, y), Align2::RIGHT_CENTER, frequency(clock.now), body(12.0), TEXT);
-        painter.text(pos2(left + X_HIGH, y), Align2::RIGHT_CENTER, frequency(clock.high), body(12.0), MUTED);
+        if !self.is_live() {
+            painter.text(pos2(left + X_HIGH, y), Align2::RIGHT_CENTER, frequency(clock.high), body(12.0), MUTED);
+        }
         let power = power.map_or("—".to_owned(), |w| format!("{w:.1} W"));
         painter.text(pos2(left + X_AVG, y), Align2::RIGHT_CENTER, power, body(12.0), MUTED);
 
@@ -585,7 +608,7 @@ impl ThermalEye {
             x += chip_width + 6.0;
         }
         let note = pos2(controls.right() - PAD, controls.top() + 18.5);
-        ui.painter().text(note, Align2::RIGHT_CENTER, "Solid: temperature    Dashed: usage", body(11.0), FAINT);
+        ui.painter().text(note, Align2::RIGHT_CENTER, "Bright: temperature    Faint: usage", body(11.0), FAINT);
 
         let (rect, _) = ui.allocate_exact_size(vec2(width, GRAPH_PLOT_H), Sense::hover());
         let rect = rect.shrink2(vec2(PAD - 8.0, 0.0));
@@ -735,7 +758,11 @@ impl ThermalEye {
             UpdateState::Failed(reason) => elide(reason, 44),
         };
         let x = if busy { start } else { button.right() + 10.0 };
-        ui.painter().text(pos2(x, y), Align2::LEFT_CENTER, status, body(11.5), FAINT);
+        let shown = ui.painter().text(pos2(x, y), Align2::LEFT_CENTER, &status, body(11.5), FAINT);
+        if let UpdateState::Failed(reason) = &monitor.update {
+            let response = ui.interact(shown, ui.scope_id().with("update-failure"), Sense::hover());
+            show_full_text(ui, &response, shown, &status, reason);
+        }
     }
 
     fn compact_table(&mut self, ui: &mut Ui, width: f32, monitor: &Monitor) {
@@ -749,9 +776,14 @@ impl ThermalEye {
         let left = head.left() + PAD;
         let painter = ui.painter();
         let y = head.center().y + 1.0;
-        caps(painter, pos2(left + X_NOW, y), Align2::RIGHT_CENTER, "NOW", FAINT);
-        caps(painter, pos2(left + X_HIGH, y), Align2::RIGHT_CENTER, "HIGH", FAINT);
-        caps(painter, pos2(left + X_AVG, y), Align2::RIGHT_CENTER, "AVG", FAINT);
+        let live = self.is_live();
+        if live {
+            caps(painter, pos2(left + X_NOW, y), Align2::RIGHT_CENTER, "TEMP", FAINT);
+        } else {
+            caps(painter, pos2(left + X_NOW, y), Align2::RIGHT_CENTER, "NOW", FAINT);
+            caps(painter, pos2(left + X_HIGH, y), Align2::RIGHT_CENTER, "HIGH", FAINT);
+            caps(painter, pos2(left + X_AVG, y), Align2::RIGHT_CENTER, "AVG", FAINT);
+        }
         caps(painter, pos2(left + X_BAR, y), Align2::LEFT_CENTER, "USAGE", FAINT);
 
         for component in self.visible(monitor) {
@@ -766,8 +798,10 @@ impl ThermalEye {
             let name = component.title.to_uppercase();
             painter.text(pos2(left, y), Align2::LEFT_CENTER, name, strong(11.5), MUTED);
             painter.text(pos2(left + X_NOW, y), Align2::RIGHT_CENTER, self.temp(high.now), strong(14.0), tint(high.now));
-            painter.text(pos2(left + X_HIGH, y), Align2::RIGHT_CENTER, self.temp(high.high), strong(12.5), tint(high.high));
-            painter.text(pos2(left + X_AVG, y), Align2::RIGHT_CENTER, self.temp(avg), body(12.5), MUTED);
+            if !live {
+                painter.text(pos2(left + X_HIGH, y), Align2::RIGHT_CENTER, self.temp(high.high), strong(12.5), tint(high.high));
+                painter.text(pos2(left + X_AVG, y), Align2::RIGHT_CENTER, self.temp(avg), body(12.5), MUTED);
+            }
 
             let bar = Rect::from_min_max(pos2(left + X_BAR, y - 8.0), pos2(rect.right() - PAD, y + 8.0));
             match component.usage.and_then(|id| monitor.stats(id, seconds).avg) {
@@ -940,6 +974,13 @@ fn frequency(megahertz: Option<f32>) -> String {
         None => "—".into(),
         Some(mhz) if mhz >= 1000.0 => format!("{:.2} GHz", mhz / 1000.0),
         Some(mhz) => format!("{mhz:.0} MHz"),
+    }
+}
+
+/// Shows the whole text as a tooltip while the pointer is over a shortened version.
+fn show_full_text(ui: &Ui, response: &egui::Response, shown_rect: Rect, shown: &str, full: &str) {
+    if shown != full && ui.rect_contains_pointer(shown_rect) {
+        response.clone().on_hover_text(full);
     }
 }
 

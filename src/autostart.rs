@@ -94,11 +94,8 @@ pub fn set(enable: bool) -> bool {
     run_entry().is_none()
 }
 
-/// Whether "Start with Windows" is on. Follows the app if its folder has moved.
+/// Whether "Start with Windows" is on. This only reads: another copy of the app
+/// starting up must not take over the entry from the installed one.
 pub fn is_enabled() -> bool {
-    let Some(entry) = run_entry() else { return false };
-    if current_command().is_some_and(|command| command != entry) {
-        write_run_entry();
-    }
-    true
+    run_entry().is_some()
 }

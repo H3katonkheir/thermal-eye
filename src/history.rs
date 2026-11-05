@@ -51,6 +51,9 @@ pub struct Series {
     coarse: VecDeque<Bucket>,
     open_bucket: Accumulator,
     open_samples: u32,
+    /// Samples and buckets ever received, including ones since dropped.
+    fine_total: u64,
+    coarse_total: u64,
 }
 
 impl Series {
@@ -59,6 +62,7 @@ impl Series {
             self.fine.pop_front();
         }
         self.fine.push_back(value);
+        self.fine_total += 1;
 
         self.open_bucket.add(value, value);
         self.open_samples += 1;
@@ -66,6 +70,7 @@ impl Series {
             if self.coarse.len() == COARSE_SAMPLES {
                 self.coarse.pop_front();
             }
+            self.coarse_total += 1;
             self.coarse.push_back(Bucket {
                 high: self.open_bucket.high.unwrap_or(f32::NAN),
                 avg: self.open_bucket.avg().unwrap_or(f32::NAN),
@@ -107,27 +112,35 @@ impl Series {
     pub fn points(&self, seconds: u32, max_points: usize, peak: bool) -> Vec<f32> {
         if seconds as usize <= FINE_SAMPLES {
             let samples: Vec<f32> = self.fine.iter().copied().collect();
-            resample(&samples, seconds as usize, max_points, peak)
+            resample(&samples, self.fine_total, seconds as usize, max_points, peak)
         } else {
             let pick = |b: &Bucket| if peak { b.high } else { b.avg };
             let samples: Vec<f32> = self.coarse.iter().map(pick).collect();
-            resample(&samples, (seconds / COARSE_SECONDS) as usize, max_points, peak)
+            resample(&samples, self.coarse_total, (seconds / COARSE_SECONDS) as usize, max_points, peak)
         }
     }
 }
 
-fn resample(samples: &[f32], window: usize, max_points: usize, peak: bool) -> Vec<f32> {
-    let count = window.min(max_points).max(2);
+/// Reduces a window of samples to at most `max_points`, grouping them when needed.
+///
+/// `total` is how many samples the series has ever received. Groups are fixed runs
+/// of that count rather than being measured back from the newest sample, so a
+/// finished group never changes and the graph slides instead of changing shape.
+fn resample(samples: &[f32], total: u64, window: usize, max_points: usize, peak: bool) -> Vec<f32> {
+    let group = window.div_ceil(max_points.max(1)).max(1) as u64;
+    let count = (window as u64 / group).max(2);
+    let first_held = total - samples.len() as u64;
+    let newest_group = total.saturating_sub(1) / group;
+
     (0..count)
-        .map(|i| {
-            // Span of this point, measured in samples from the start of the window.
-            let start = i * window / count;
-            let end = ((i + 1) * window / count).max(start + 1);
+        .map(|index| {
             let mut span = Accumulator::default();
-            for offset in start..end.min(window) {
-                let age = window - 1 - offset;
-                if let Some(index) = samples.len().checked_sub(age + 1) {
-                    span.add(samples[index], samples[index]);
+            if let Some(number) = newest_group.checked_sub(count - 1 - index) {
+                for position in (number * group)..((number + 1) * group).min(total) {
+                    if position >= first_held {
+                        let value = samples[(position - first_held) as usize];
+                        span.add(value, value);
+                    }
                 }
             }
             if peak { span.high.unwrap_or(f32::NAN) } else { span.avg().unwrap_or(f32::NAN) }
@@ -241,6 +254,29 @@ mod tests {
         let series = filled(&[0.0, 10.0, 0.0, 30.0]);
         assert_eq!(series.points(4, 2, true), vec![10.0, 30.0]);
         assert_eq!(series.points(4, 2, false), vec![5.0, 15.0]);
+    }
+
+    /// Two samples is one group at this width, so everything moves along by one.
+    fn assert_slides(window: u32, peak: bool) {
+        let mut series = Series::default();
+        let wave = |i: usize| ((i * 37) % 101) as f32;
+        for i in 0..1000 {
+            series.push(wave(i));
+        }
+        let before = series.points(window, 588, peak);
+        series.push(wave(1000));
+        series.push(wave(1001));
+        let after = series.points(window, 588, peak);
+
+        assert_eq!(before.len(), after.len());
+        let settled = before.len() - 2;
+        assert_eq!(&after[..settled], &before[1..=settled], "history must not change shape");
+    }
+
+    #[test]
+    fn long_windows_keep_their_shape_as_samples_arrive() {
+        assert_slides(900, false);
+        assert_slides(900, true);
     }
 
     #[test]

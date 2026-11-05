@@ -26,6 +26,14 @@ fn full_button(index: usize) -> (f32, f32) {
     button(index, 30.0, WIDTH, TITLE_H)
 }
 
+fn collect_text(shape: &egui::Shape, into: &mut Vec<String>) {
+    match shape {
+        egui::Shape::Text(text) => into.push(text.galley.text().to_owned()),
+        egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| collect_text(shape, into)),
+        _ => {}
+    }
+}
+
 struct Harness {
     ctx: Context,
     app: ThermalEye,
@@ -33,6 +41,8 @@ struct Harness {
     monitor: Arc<Mutex<Monitor>>,
     commands: Vec<ViewportCommand>,
     copied: Vec<String>,
+    /// Every piece of text drawn in the last frame.
+    drawn: Vec<String>,
     screen_height: f32,
 }
 
@@ -60,7 +70,7 @@ impl Harness {
         let (sender, inbox) = channel();
         let app = ThermalEye::new(&ctx, monitor.clone(), sender, config);
         let mut harness =
-            Self { ctx, app, inbox, monitor, commands: Vec::new(), copied: Vec::new(), screen_height: 1400.0 };
+            Self { ctx, app, inbox, monitor, commands: Vec::new(), copied: Vec::new(), drawn: Vec::new(), screen_height: 1400.0 };
         harness.frame(Vec::new());
         harness
     }
@@ -77,6 +87,10 @@ impl Harness {
         let app = &mut self.app;
         let mut output = self.ctx.run_ui(input, |ui| app.draw(ui));
         output.textures_delta.clear();
+        self.drawn.clear();
+        for clipped in &output.shapes {
+            collect_text(&clipped.shape, &mut self.drawn);
+        }
         for command in &output.platform_output.commands {
             if let egui::OutputCommand::CopyText(text) = command {
                 self.copied.push(text.clone());
@@ -445,6 +459,95 @@ fn copy_details_puts_the_report_on_the_clipboard() {
     widget.click((PAD + X_NAME + 150.0 + 40.0, top + SETTINGS_ROW_H * 6.5));
     assert_eq!(widget.copied.len(), 1);
     assert!(widget.copied[0].contains("AMD Ryzen 9 9950X3D"));
+}
+
+impl Harness {
+    fn shows(&self, text: &str) -> bool {
+        self.drawn.iter().any(|drawn| drawn == text)
+    }
+
+    /// Rests the pointer somewhere, with tooltips set to appear at once.
+    fn hover(&mut self, (x, y): (f32, f32)) {
+        self.ctx.global_style_mut(|style| {
+            style.interaction.tooltip_delay = 0.0;
+            style.interaction.show_tooltips_only_when_still = false;
+        });
+        for _ in 0..4 {
+            self.frame(vec![Event::PointerMoved(pos2(x, y))]);
+        }
+    }
+}
+
+const LIVE: u32 = 1;
+const RAM_SUBTITLE: &str = "2 × A-DATA AX5U6000C3032G-BLABK";
+
+#[test]
+fn hovering_shortened_text_shows_all_of_it() {
+    let mut widget = Harness::new(Config::default());
+    widget.frame(Vec::new());
+    assert!(!widget.shows(RAM_SUBTITLE), "shortened until hovered");
+
+    widget.hover((PAD + X_NAME + 40.0, row_y(2) + 9.0));
+    assert!(widget.shows(RAM_SUBTITLE));
+}
+
+#[test]
+fn the_tooltip_only_appears_over_the_text_itself() {
+    let mut widget = Harness::new(Config::default());
+    widget.hover((PAD + X_NOW, row_y(2)));
+    assert!(!widget.shows(RAM_SUBTITLE));
+}
+
+#[test]
+fn hovering_text_that_fits_adds_nothing() {
+    let mut widget = Harness::new(Config::default());
+    widget.hover((PAD + X_NAME + 20.0, row_y(1) + 9.0));
+    assert_eq!(widget.drawn.iter().filter(|text| *text == "RX 9070 XT").count(), 1);
+}
+
+#[test]
+fn a_shortened_sensor_name_also_shows_in_full() {
+    let mut widget = Harness::new(Config { expanded: vec!["storage".into()], ..Config::default() });
+    widget.monitor.lock().unwrap().components[3].rows[1].label = "A drive with a really very long model name".into();
+    widget.frame(Vec::new());
+    assert!(!widget.shows("A drive with a really very long model name"));
+
+    let rows_above = TITLE_H + HEADER_H + COMPONENT_H * 4.0;
+    widget.hover((PAD + X_NAME + 30.0, rows_above + SENSOR_H * 1.5));
+    assert!(widget.shows("A drive with a really very long model name"));
+}
+
+#[test]
+fn live_shows_one_temperature_column() {
+    let mut widget = Harness::new(Config { window_seconds: LIVE, ..Config::default() });
+    widget.frame(Vec::new());
+    assert!(widget.shows("TEMP") && widget.shows("USAGE"));
+    assert!(!widget.shows("NOW") && !widget.shows("HIGH") && !widget.shows("AVG"));
+}
+
+#[test]
+fn other_spans_keep_all_three_columns() {
+    let mut widget = Harness::new(Config::default());
+    widget.frame(Vec::new());
+    assert!(widget.shows("NOW") && widget.shows("HIGH") && widget.shows("AVG"));
+    assert!(!widget.shows("TEMP"));
+}
+
+#[test]
+fn live_applies_to_the_compact_view_too() {
+    let mut widget = Harness::new(Config { window_seconds: LIVE, compact: true, ..Config::default() });
+    widget.frame(Vec::new());
+    assert!(widget.shows("TEMP"));
+    assert!(!widget.shows("HIGH") && !widget.shows("AVG"));
+}
+
+#[test]
+fn live_drops_the_redundant_peak_clock_but_keeps_power() {
+    let config = Config { window_seconds: LIVE, expanded: vec!["cpu".into()], ..Config::default() };
+    let mut widget = Harness::new(config);
+    widget.frame(Vec::new());
+    assert!(widget.shows("CLOCK") && widget.shows("POWER"));
+    assert!(!widget.shows("PEAK"));
 }
 
 #[test]

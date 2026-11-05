@@ -191,7 +191,10 @@ pub fn start(monitor: Arc<Mutex<Monitor>>, ctx: egui::Context, automatic: bool) 
                     set_state(UpdateState::Ready(update.manifest.version.clone()));
                     *ready = Some(update);
                 }
-                Ok(None) => set_state(UpdateState::UpToDate),
+                Ok(None) => {
+                    logfile::write("Update check: up to date");
+                    set_state(UpdateState::UpToDate);
+                }
                 Err(reason) => {
                     logfile::write(format!("Update check failed: {reason}"));
                     match (quiet, ready.is_none()) {

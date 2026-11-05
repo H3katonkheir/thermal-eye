@@ -31,6 +31,7 @@ use windows::core::{Error, PCWSTR, w};
 
 use crate::autostart;
 use crate::driver;
+use crate::logfile;
 use crate::model::{Link, Monitor};
 use crate::update;
 use crate::window;
@@ -56,7 +57,7 @@ pub enum Command {
     SetAutomaticUpdates(bool),
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Launch {
     /// Through the scheduled task: elevated, with no prompt.
     Task,
@@ -121,6 +122,9 @@ pub fn start(monitor: Arc<Mutex<Monitor>>, ctx: egui::Context, elevate: bool, ch
         loop {
             let missing = !driver::is_installed();
             shared.update(|monitor| monitor.driver_missing = missing);
+            if missing {
+                logfile::write("PawnIO driver is not installed");
+            }
 
             let task_ready = || helper_path().is_some_and(|helper| autostart::task_ready(&helper));
             let launch = match (elevate, try_task) {
@@ -129,13 +133,29 @@ pub fn start(monitor: Arc<Mutex<Monitor>>, ctx: egui::Context, elevate: bool, ch
                 (true, _) => Launch::Elevated,
             };
             let link = if launch == Launch::Elevated { Link::AwaitingConsent } else { Link::Starting };
-            shared.update(|monitor| monitor.link = link);
+            let description = match launch {
+                Launch::Task => "scheduled task",
+                Launch::Elevated => "UAC prompt",
+                Launch::Plain => "without elevation",
+            };
+            logfile::write(format!("Starting sensor helper: {description}"));
+            shared.update(|monitor| {
+                monitor.link = link;
+                monitor.launch = description;
+            });
 
             match session(&shared, &inbox, launch) {
                 Ended::Restart => (elevate, try_task) = (true, true),
-                Ended::Declined => elevate = false,
-                Ended::TaskFailed => try_task = false,
+                Ended::Declined => {
+                    logfile::write("Permission prompt declined, continuing with limited sensors");
+                    elevate = false;
+                }
+                Ended::TaskFailed => {
+                    logfile::write("The scheduled task did not start the helper, falling back to a prompt");
+                    try_task = false;
+                }
                 Ended::Failed(reason) => {
+                    logfile::write(format!("Sensor helper problem: {reason}"));
                     shared.update(|monitor| monitor.link = Link::Lost(reason));
                     loop {
                         match inbox.recv() {

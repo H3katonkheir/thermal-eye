@@ -1,0 +1,27 @@
+name: Build
+
+on:
+  push:
+
+# Read-only: this workflow never publishes anything.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2025
+    steps:
+      # Pinned to exact commits, because a tag can be moved after the fact.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Build app and installer
+        run: .\build.ps1
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: thermal-eye-installer
+          path: dist/ThermalEyeSetup-*.exe
+          if-no-files-found: error

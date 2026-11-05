@@ -46,13 +46,38 @@ static class Helper
             using var pipe = new NamedPipeClientStream(
                 ".", pipeName, PipeDirection.Out, PipeOptions.None, TokenImpersonationLevel.Anonymous);
             pipe.Connect(15000);
-            var computer = Open();
-            try { Stream(pipe, computer, interval); }
-            finally { computer.Close(); }
+            try
+            {
+                var computer = Open();
+                try { Stream(pipe, computer, interval); }
+                finally { computer.Close(); }
+            }
+            catch (Exception e) when (e is not IOException)
+            {
+                // This process is elevated, so it reports through the pipe and leaves
+                // writing files to the UI. See src/logfile.rs.
+                Report(pipe, $"{e.GetType().Name}: {e.Message}");
+                return 1;
+            }
             return 0;
         }
         catch (IOException) { return 0; }     // UI closed the pipe.
         catch (TimeoutException) { return 3; }
+    }
+
+    static void Report(Stream pipe, string message)
+    {
+        var buffer = new MemoryStream();
+        using (var json = new Utf8JsonWriter(buffer))
+        {
+            json.WriteStartObject();
+            json.WriteString("t", "log");
+            json.WriteString("message", message);
+            json.WriteEndObject();
+        }
+        buffer.WriteByte((byte)'\n');
+        try { pipe.Write(buffer.GetBuffer(), 0, (int)buffer.Length); pipe.Flush(); }
+        catch (IOException) { }
     }
 
     static Computer Open()

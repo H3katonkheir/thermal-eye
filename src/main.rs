@@ -4,9 +4,11 @@ mod app;
 mod autostart;
 mod bridge;
 mod config;
+mod diagnostics;
 mod driver;
 mod graph;
 mod history;
+mod logfile;
 mod logo;
 mod manifest;
 mod model;
@@ -34,6 +36,9 @@ fn main() -> eframe::Result {
     if replay.is_none() && !window::claim_single_instance() {
         return Ok(());
     }
+
+    logfile::init();
+    logfile::write(format!("Thermal Eye {} on {}", update::CURRENT_VERSION, diagnostics::windows_version()));
 
     let config = Config::load();
     let icon = logo::decode(logo::ICON);

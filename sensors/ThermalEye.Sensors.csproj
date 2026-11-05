@@ -17,6 +17,7 @@
     <ApplicationIcon>../assets/icon.ico</ApplicationIcon>
     <Version>0.1.0</Version>
     <Product>Thermal Eye</Product>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <AssemblyTitle>Thermal Eye sensors</AssemblyTitle>
     <Copyright>Copyright (c) 2026 Dominique Bastenie</Copyright>
   </PropertyGroup>

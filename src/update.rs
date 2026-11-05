@@ -20,6 +20,7 @@ use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1D
 use windows::Win32::System::Threading::{GetExitCodeProcess, INFINITE, WaitForSingleObject};
 
 use crate::bridge;
+use crate::logfile;
 use crate::manifest::{self, Manifest};
 use crate::model::{Monitor, UpdateState};
 
@@ -186,13 +187,19 @@ pub fn start(monitor: Arc<Mutex<Monitor>>, ctx: egui::Context, automatic: bool) 
             });
             match found {
                 Ok(Some(update)) => {
+                    logfile::write(format!("Update {} downloaded", update.manifest.version));
                     set_state(UpdateState::Ready(update.manifest.version.clone()));
                     *ready = Some(update);
                 }
                 Ok(None) => set_state(UpdateState::UpToDate),
-                Err(_) if quiet && ready.is_none() => set_state(UpdateState::Idle),
-                Err(_) if quiet => {}
-                Err(reason) => set_state(UpdateState::Failed(reason)),
+                Err(reason) => {
+                    logfile::write(format!("Update check failed: {reason}"));
+                    match (quiet, ready.is_none()) {
+                        (true, true) => set_state(UpdateState::Idle),
+                        (true, false) => {}
+                        (false, _) => set_state(UpdateState::Failed(reason)),
+                    }
+                }
             }
         };
 
@@ -208,8 +215,14 @@ pub fn start(monitor: Arc<Mutex<Monitor>>, ctx: egui::Context, automatic: bool) 
                     // On success the installer closes this app, so reaching the
                     // end means it was cancelled or failed.
                     match install(&update.path, &update.manifest) {
-                        Ok(_) => set_state(UpdateState::Ready(version)),
-                        Err(reason) => set_state(UpdateState::Failed(reason)),
+                        Ok(code) => {
+                            logfile::write(format!("Update installer ended with code {code}"));
+                            set_state(UpdateState::Ready(version));
+                        }
+                        Err(reason) => {
+                            logfile::write(format!("Could not install the update: {reason}"));
+                            set_state(UpdateState::Failed(reason));
+                        }
                     }
                 }
                 Err(RecvTimeoutError::Timeout) => {

@@ -3,6 +3,7 @@
 use std::sync::mpsc::{Receiver, channel};
 
 use eframe::egui::{
+    self,
     Event, Modifiers, PointerButton, RawInput, Rect, ViewportCommand, ViewportId, pos2,
 };
 
@@ -31,6 +32,7 @@ struct Harness {
     inbox: Receiver<Command>,
     monitor: Arc<Mutex<Monitor>>,
     commands: Vec<ViewportCommand>,
+    copied: Vec<String>,
     screen_height: f32,
 }
 
@@ -58,7 +60,7 @@ impl Harness {
         let (sender, inbox) = channel();
         let app = ThermalEye::new(&ctx, monitor.clone(), sender, config);
         let mut harness =
-            Self { ctx, app, inbox, monitor, commands: Vec::new(), screen_height: 1400.0 };
+            Self { ctx, app, inbox, monitor, commands: Vec::new(), copied: Vec::new(), screen_height: 1400.0 };
         harness.frame(Vec::new());
         harness
     }
@@ -75,6 +77,11 @@ impl Harness {
         let app = &mut self.app;
         let mut output = self.ctx.run_ui(input, |ui| app.draw(ui));
         output.textures_delta.clear();
+        for command in &output.platform_output.commands {
+            if let egui::OutputCommand::CopyText(text) = command {
+                self.copied.push(text.clone());
+            }
+        }
         if let Some(viewport) = output.viewport_output.get(&ViewportId::ROOT) {
             self.commands.extend(viewport.commands.iter().cloned());
         }
@@ -426,6 +433,18 @@ fn the_notice_waits_while_a_sensor_problem_is_showing() {
 #[test]
 fn release_notes_point_at_the_running_version() {
     assert!(update::release_notes_url().ends_with(&format!("/releases/tag/v{}", update::CURRENT_VERSION)));
+}
+
+#[test]
+fn copy_details_puts_the_report_on_the_clipboard() {
+    let mut widget = Harness::new(Config::default());
+    widget.monitor.lock().unwrap().link = Link::Connected { elevated: true };
+    widget.frame(Vec::new());
+    widget.click(full_button(6));
+    let top = widget.height() - BOTTOM_PAD - widget.app.settings_height();
+    widget.click((PAD + X_NAME + 150.0 + 40.0, top + SETTINGS_ROW_H * 6.5));
+    assert_eq!(widget.copied.len(), 1);
+    assert!(widget.copied[0].contains("AMD Ryzen 9 9950X3D"));
 }
 
 #[test]

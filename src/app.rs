@@ -11,6 +11,7 @@ use eframe::egui::{
 
 use crate::bridge::Command;
 use crate::config::{self, Config};
+use crate::diagnostics;
 use crate::graph::{self, Line};
 use crate::history::Stats;
 use crate::logo;
@@ -65,6 +66,7 @@ const WINDOWS: [(&str, u32, f32); 7] = [
     ("24h", 86400, 29.0),
 ];
 const MIN_GRAPH_SECONDS: u32 = 60;
+const COPIED_NOTE_TIME: Duration = Duration::from_secs(3);
 
 enum Item<'a> {
     Component(&'a Component),
@@ -96,6 +98,7 @@ pub struct ThermalEye {
     requested_size: Vec2,
     /// Just updated, and the user has not dismissed the notice yet.
     just_updated: bool,
+    copied_at: Option<Instant>,
 }
 
 impl ThermalEye {
@@ -122,6 +125,7 @@ impl ThermalEye {
             settings_open: false,
             requested_size: Vec2::ZERO,
             just_updated,
+            copied_at: None,
         }
     }
 
@@ -592,7 +596,7 @@ impl ThermalEye {
     }
 
     fn settings_height(&self) -> f32 {
-        SETTINGS_ROW_H * 6.0
+        SETTINGS_ROW_H * 7.0
     }
 
     fn settings_panel(&mut self, ui: &mut Ui, width: f32, monitor: &Monitor) {
@@ -648,6 +652,7 @@ impl ThermalEye {
         ui.painter().text(pos2(start, row(3.0)), Align2::LEFT_CENTER, status, body(12.5), TEXT);
 
         self.update_settings(ui, monitor, rect, start);
+        self.diagnostics_setting(ui, monitor, rect, start);
     }
 
     fn autostart_setting(&mut self, ui: &mut Ui, monitor: &Monitor, panel: Rect, start: f32) {
@@ -663,6 +668,26 @@ impl ThermalEye {
                 let _ = self.commands.send(Command::SetAutostart(enable));
             }
         }
+    }
+
+    fn diagnostics_setting(&mut self, ui: &mut Ui, monitor: &Monitor, panel: Rect, start: f32) {
+        let y = panel.top() + SETTINGS_ROW_H * 6.5;
+        let left = panel.left() + PAD + X_NAME;
+        ui.painter().text(pos2(left, y), Align2::LEFT_CENTER, "Diagnostics", body(12.5), MUTED);
+
+        let button = Rect::from_min_size(pos2(start, y - 11.0), vec2(86.0, 22.0));
+        let response = ui.interact(button, ui.scope_id().with("diagnostics"), Sense::click());
+        chip_painter(ui.painter(), button, "Copy details", false, response.hovered());
+        if response.clicked() {
+            ui.ctx().copy_text(diagnostics::report(monitor));
+            self.copied_at = Some(Instant::now());
+            ui.ctx().request_repaint_after(COPIED_NOTE_TIME);
+        }
+
+        let copied = self.copied_at.is_some_and(|at| at.elapsed() < COPIED_NOTE_TIME);
+        let note = if copied { "Copied, ready to paste" } else { "Hardware and sensor details, for reporting a problem" };
+        let note_pos = pos2(button.right() + 10.0, y);
+        ui.painter().text(note_pos, Align2::LEFT_CENTER, note, body(11.0), FAINT);
     }
 
     fn update_settings(&mut self, ui: &mut Ui, monitor: &Monitor, panel: Rect, start: f32) {

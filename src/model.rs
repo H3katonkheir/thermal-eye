@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use serde::Deserialize;
 
 use crate::history::{History, SeriesId, Stats};
+use crate::logfile;
 use crate::topology::Topology;
 
 /// Temperatures outside this range are disconnected inputs or failed reads
@@ -16,6 +17,7 @@ const PLAUSIBLE_TEMP: std::ops::RangeInclusive<f32> = 1.0..=150.0;
 enum Message {
     Schema { admin: bool, hardware: Vec<HardwareDef>, sensors: Vec<SensorDef> },
     Values { v: Vec<Option<f32>> },
+    Log { message: String },
 }
 
 #[derive(Deserialize)]
@@ -38,6 +40,19 @@ impl SensorDef {
     fn is(&self, kind: &str, name: &str) -> bool {
         self.kind == kind && self.name == name
     }
+}
+
+/// One sensor exactly as reported, for the diagnostics report.
+pub struct RawSensor {
+    pub name: String,
+    pub kind: String,
+    pub series: SeriesId,
+}
+
+pub struct RawHardware {
+    pub name: String,
+    pub kind: String,
+    pub sensors: Vec<RawSensor>,
 }
 
 /// A sensor line under a component: a temperature, a usage figure, or both.
@@ -182,6 +197,9 @@ pub struct Monitor {
     /// The PawnIO driver is not installed, so most temperatures are unavailable.
     pub driver_missing: bool,
     pub update: UpdateState,
+    /// How the helper was started, for the diagnostics report.
+    pub launch: &'static str,
+    pub hardware: Vec<RawHardware>,
     pub components: Vec<Component>,
     pub history: History,
     topology: Topology,
@@ -197,6 +215,8 @@ impl Monitor {
             autostart: false,
             driver_missing: false,
             update: UpdateState::Idle,
+            launch: "not started",
+            hardware: Vec::new(),
             components: Vec::new(),
             history: History::default(),
             topology,
@@ -211,10 +231,16 @@ impl Monitor {
         match serde_json::from_slice(line) {
             Ok(Message::Schema { admin, hardware, sensors }) => {
                 self.link = Link::Connected { elevated: admin };
+                logfile::write(format!(
+                    "Helper reports {} hardware items, {} sensors, admin={admin}",
+                    hardware.len(),
+                    sensors.len()
+                ));
                 self.apply_schema(&hardware, &sensors);
             }
             Ok(Message::Values { v }) => self.apply_values(&v),
-            Err(_) => {}
+            Ok(Message::Log { message }) => logfile::write(format!("Helper: {message}")),
+            Err(e) => logfile::write(format!("Unreadable message from the helper: {e}")),
         }
     }
 
@@ -237,6 +263,22 @@ impl Monitor {
         self.components = components;
         self.derived = derived;
         self.limits = limits;
+        self.hardware = hardware
+            .iter()
+            .map(|item| RawHardware {
+                name: item.name.clone(),
+                kind: item.kind.clone(),
+                sensors: sensors
+                    .iter()
+                    .filter(|sensor| sensor.hw == item.id)
+                    .map(|sensor| RawSensor {
+                        name: sensor.name.clone(),
+                        kind: sensor.kind.clone(),
+                        series: self.history.id(&sensor.id),
+                    })
+                    .collect(),
+            })
+            .collect();
         self.bindings = sensors
             .iter()
             .map(|sensor| Binding {

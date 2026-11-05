@@ -846,3 +846,44 @@ fn the_compact_title_clears_the_buttons_at_every_width() {
         assert!(title.right() + gap <= first_button, "min {min}, max {max}: the title runs under the buttons");
     }
 }
+
+/// Centre of the heat ring on a component row.
+fn ring_at(index: usize) -> (f32, f32) {
+    (PAD + X_RING, row_y(index))
+}
+
+#[test]
+fn hovering_a_ring_shows_its_warning_and_danger_levels() {
+    let mut widget = Harness::new(Config::default());
+    let (warn, critical) = {
+        let monitor = widget.monitor.lock().unwrap();
+        (monitor.components[0].warn, monitor.components[0].critical)
+    };
+    let expected = widget.app.limits_help(warn, critical);
+    assert_eq!(expected, format!("Warning from {warn:.0}°\nDanger from {critical:.0}°"));
+
+    widget.hover(ring_at(0));
+    assert!(widget.shows(&expected));
+}
+
+#[test]
+fn ring_levels_follow_the_temperature_unit() {
+    let mut widget = Harness::new(Config { fahrenheit: true, ..Config::default() });
+    assert_eq!(widget.app.limits_help(85.0, 95.0), "Warning from 185°\nDanger from 203°");
+    widget.hover(ring_at(0));
+    assert!(widget.drawn.iter().any(|(text, _)| text.starts_with("Warning from") && text.contains("°")));
+}
+
+#[test]
+fn the_ring_tooltip_only_appears_over_the_ring() {
+    let mut widget = Harness::new(Config::default());
+    widget.hover((PAD + X_NOW + 30.0, row_y(0)));
+    assert!(!widget.drawn.iter().any(|(text, _)| text.starts_with("Warning from")));
+}
+
+#[test]
+fn clicking_the_ring_still_opens_the_row() {
+    let mut widget = Harness::new(Config::default());
+    widget.click(ring_at(0));
+    assert_eq!(widget.app.config.expanded, ["cpu"]);
+}

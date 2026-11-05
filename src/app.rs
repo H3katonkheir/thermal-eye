@@ -47,6 +47,7 @@ const SCREEN_MARGIN: f32 = 90.0;
 const X_NAME: f32 = 20.0;
 const X_RING: f32 = 204.0;
 const X_NOW: f32 = 256.0;
+const RING_RADIUS: f32 = 9.0;
 /// Distance between the right edges of neighbouring temperature columns.
 const TEMP_STEP: f32 = 54.0;
 const AVG_STEP: f32 = 52.0;
@@ -188,6 +189,11 @@ impl ThermalEye {
             just_updated,
             copied_at: None,
         }
+    }
+
+    fn limits_help(&self, warn: f32, critical: f32) -> String {
+        format!("Warning from {}
+Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
     }
 
     fn columns(&self) -> Columns {
@@ -553,9 +559,13 @@ impl ThermalEye {
         let high = monitor.stats(component.high, seconds);
         let avg = monitor.stats(component.avg, seconds);
         let (warn, critical) = (component.warn, component.critical);
+        let ring_center = pos2(left + X_RING, y);
         if let Some(now) = high.now {
             let fraction = now / critical;
-            ring(painter, pos2(left + X_RING, y), 9.0, fraction, heat_ring(now, warn, critical));
+            ring(painter, ring_center, RING_RADIUS, fraction, heat_ring(now, warn, critical));
+            if ui.rect_contains_pointer(Rect::from_center_size(ring_center, Vec2::splat(RING_RADIUS * 2.0 + 8.0))) {
+                response.clone().on_hover_text(self.limits_help(warn, critical));
+            }
         }
         let tint = |value: Option<f32>| value.map_or(FAINT, |v| heat_text(v, warn, critical));
         let columns = self.columns();

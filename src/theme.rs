@@ -167,8 +167,13 @@ pub fn progress(painter: &Painter, rect: Rect, fraction: f32, color: Color32) {
     }
 }
 
+const RING_BAR: f32 = 2.5;
+/// Track showing on each side of the ring's bar.
+const RING_EDGE: f32 = 1.0;
+
 pub fn ring(painter: &Painter, center: Pos2, radius: f32, fraction: f32, color: Color32) {
-    painter.circle_stroke(center, radius, Stroke::new(2.5, TRACK));
+    // The track shows an even edge on both sides of the bar.
+    painter.circle_stroke(center, radius, Stroke::new(RING_BAR + 2.0 * RING_EDGE, TRACK));
     let fraction = fraction.clamp(0.0, 1.0);
     if fraction > 0.01 {
         let steps = (fraction * 48.0).ceil() as usize + 1;
@@ -178,7 +183,7 @@ pub fn ring(painter: &Painter, center: Pos2, radius: f32, fraction: f32, color: 
                 center + radius * vec2(angle.cos(), angle.sin())
             })
             .collect();
-        painter.add(Shape::line(points, Stroke::new(2.5, color)));
+        painter.add(Shape::line(points, Stroke::new(RING_BAR, color)));
     }
 }
 

@@ -12,29 +12,33 @@ const COARSE_SECONDS: u32 = 60;
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Stats {
     pub now: Option<f32>,
+    pub low: Option<f32>,
     pub high: Option<f32>,
     pub avg: Option<f32>,
 }
 
 #[derive(Clone, Copy)]
 struct Bucket {
+    low: f32,
     high: f32,
     avg: f32,
 }
 
-/// Running high and mean over the samples seen so far, ignoring gaps.
+/// Running low, high and mean over the samples seen so far, ignoring gaps.
 #[derive(Clone, Copy, Default)]
 struct Accumulator {
+    low: Option<f32>,
     high: Option<f32>,
     sum: f64,
     count: u32,
 }
 
 impl Accumulator {
-    fn add(&mut self, high: f32, avg: f32) {
+    fn add(&mut self, low: f32, high: f32, avg: f32) {
         if avg.is_nan() {
             return;
         }
+        self.low = Some(self.low.map_or(low, |l| l.min(low)));
         self.high = Some(self.high.map_or(high, |h| h.max(high)));
         self.sum += avg as f64;
         self.count += 1;
@@ -64,7 +68,7 @@ impl Series {
         self.fine.push_back(value);
         self.fine_total += 1;
 
-        self.open_bucket.add(value, value);
+        self.open_bucket.add(value, value, value);
         self.open_samples += 1;
         if self.open_samples == COARSE_SECONDS {
             if self.coarse.len() == COARSE_SAMPLES {
@@ -72,6 +76,7 @@ impl Series {
             }
             self.coarse_total += 1;
             self.coarse.push_back(Bucket {
+                low: self.open_bucket.low.unwrap_or(f32::NAN),
                 high: self.open_bucket.high.unwrap_or(f32::NAN),
                 avg: self.open_bucket.avg().unwrap_or(f32::NAN),
             });
@@ -93,18 +98,19 @@ impl Series {
         let mut total = Accumulator::default();
         if seconds as usize <= FINE_SAMPLES {
             for &v in self.fine.iter().rev().take(seconds as usize) {
-                total.add(v, v);
+                total.add(v, v, v);
             }
         } else {
             let buckets = (seconds / COARSE_SECONDS) as usize;
             for b in self.coarse.iter().rev().take(buckets) {
-                total.add(b.high, b.avg);
+                total.add(b.low, b.high, b.avg);
             }
-            if let Some(high) = self.open_bucket.high {
-                total.add(high, self.open_bucket.avg().unwrap_or(f32::NAN));
+            let open = &self.open_bucket;
+            if let (Some(low), Some(high)) = (open.low, open.high) {
+                total.add(low, high, open.avg().unwrap_or(f32::NAN));
             }
         }
-        Stats { now: self.latest(), high: total.high, avg: total.avg() }
+        Stats { now: self.latest(), low: total.low, high: total.high, avg: total.avg() }
     }
 
     /// Evenly spaced values across the window, oldest first, `NaN` where there is
@@ -139,7 +145,7 @@ fn resample(samples: &[f32], total: u64, window: usize, max_points: usize, peak:
                 for position in (number * group)..((number + 1) * group).min(total) {
                     if position >= first_held {
                         let value = samples[(position - first_held) as usize];
-                        span.add(value, value);
+                        span.add(value, value, value);
                     }
                 }
             }
@@ -211,6 +217,7 @@ mod tests {
     fn stats_cover_only_the_window() {
         let stats = filled(&[90.0, 10.0, 20.0, 30.0]).stats(3);
         assert_eq!(stats.now, Some(30.0));
+        assert_eq!(stats.low, Some(10.0));
         assert_eq!(stats.high, Some(30.0));
         assert_eq!(stats.avg, Some(20.0));
     }
@@ -218,6 +225,7 @@ mod tests {
     #[test]
     fn gaps_are_ignored_by_stats() {
         let stats = filled(&[10.0, f32::NAN, 30.0]).stats(60);
+        assert_eq!(stats.low, Some(10.0));
         assert_eq!(stats.high, Some(30.0));
         assert_eq!(stats.avg, Some(20.0));
     }
@@ -229,16 +237,22 @@ mod tests {
     }
 
     #[test]
-    fn long_windows_use_minute_buckets_and_keep_the_peak() {
+    fn long_windows_use_minute_buckets_and_keep_the_extremes() {
         let mut series = Series::default();
         for i in 0..7200 {
-            series.push(if i == 100 { 99.0 } else { 40.0 });
+            series.push(match i {
+                100 => 99.0,
+                200 => 20.0,
+                _ => 40.0,
+            });
         }
-        // The spike is older than the fine ring, so only a bucket can remember it.
+        // The spikes are older than the fine ring, so only a bucket can remember them.
         let stats = series.stats(6 * 3600);
         assert_eq!(stats.high, Some(99.0));
+        assert_eq!(stats.low, Some(20.0));
         assert!((stats.avg.unwrap() - 40.0).abs() < 0.1);
         assert_eq!(series.stats(3600).high, Some(40.0));
+        assert_eq!(series.stats(3600).low, Some(40.0));
     }
 
     #[test]

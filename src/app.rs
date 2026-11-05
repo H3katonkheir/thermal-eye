@@ -20,8 +20,6 @@ use crate::theme::*;
 use crate::update;
 use crate::window;
 
-pub const WIDTH: f32 = 600.0;
-pub const COMPACT_WIDTH: f32 = 336.0;
 pub const INITIAL_HEIGHT: f32 = 340.0;
 
 const PAD: f32 = 14.0;
@@ -44,16 +42,18 @@ const BOTTOM_PAD: f32 = 10.0;
 /// Space kept free around the window when it grows towards the screen height.
 const SCREEN_MARGIN: f32 = 90.0;
 
-// Column anchors, measured from the left edge of the content.
+// Column anchors, measured from the left edge of the content. The columns after
+// NOW depend on which are shown; see `Columns`.
 const X_NAME: f32 = 20.0;
 const X_RING: f32 = 204.0;
 const X_NOW: f32 = 256.0;
-const X_HIGH: f32 = 310.0;
-const X_AVG: f32 = 362.0;
-const X_BAR_LEFT: f32 = 380.0;
-const X_BAR_RIGHT: f32 = 498.0;
-const X_PERCENT: f32 = 538.0;
-const X_DOT: f32 = 558.0;
+/// Distance between the right edges of neighbouring temperature columns.
+const TEMP_STEP: f32 = 54.0;
+const AVG_STEP: f32 = 52.0;
+const COMPACT_X_NOW: f32 = 112.0;
+const COMPACT_STEP: f32 = 38.0;
+const COMPACT_BAR_GAP: f32 = 12.0;
+const COMPACT_BAR_W: f32 = 108.0;
 
 const WINDOWS: [(&str, u32, f32); 7] = [
     ("Live", 1, 32.0),
@@ -66,6 +66,68 @@ const WINDOWS: [(&str, u32, f32); 7] = [
 ];
 const MIN_GRAPH_SECONDS: u32 = 60;
 const COPIED_NOTE_TIME: Duration = Duration::from_secs(3);
+
+/// Where the temperature columns sit, from the left edge of the content. MIN and
+/// MAX take no room while hidden, and the window narrows to match.
+struct Columns {
+    now: f32,
+    min: Option<f32>,
+    max: Option<f32>,
+    avg: f32,
+}
+
+impl Columns {
+    fn new(config: &Config) -> Self {
+        let (now, step, avg_step) =
+            if config.compact { (COMPACT_X_NOW, COMPACT_STEP, COMPACT_STEP) } else { (X_NOW, TEMP_STEP, AVG_STEP) };
+        // In Live there is no span, so MIN and MAX would just repeat the reading.
+        let span = !is_live(config);
+        let mut x = now;
+        let mut next = |shown: bool| {
+            shown.then(|| {
+                x += step;
+                x
+            })
+        };
+        let min = next(span && config.columns.min);
+        let max = next(span && config.columns.max);
+        Self { now, min, max, avg: x + avg_step }
+    }
+
+    fn bar_left(&self) -> f32 {
+        self.avg + 18.0
+    }
+
+    fn bar_right(&self) -> f32 {
+        self.bar_left() + 118.0
+    }
+
+    fn percent(&self) -> f32 {
+        self.bar_right() + 40.0
+    }
+
+    fn dot(&self) -> f32 {
+        self.percent() + 20.0
+    }
+
+    fn compact_bar(&self) -> f32 {
+        self.avg + COMPACT_BAR_GAP
+    }
+}
+
+fn is_live(config: &Config) -> bool {
+    config.window_seconds == WINDOWS[0].1
+}
+
+/// The window's width for the chosen view and columns.
+pub fn window_width(config: &Config) -> f32 {
+    let columns = Columns::new(config);
+    if config.compact {
+        PAD + columns.compact_bar() + COMPACT_BAR_W + PAD
+    } else {
+        PAD + columns.dot() + 28.0
+    }
+}
 
 enum Item<'a> {
     Component(&'a Component),
@@ -128,9 +190,8 @@ impl ThermalEye {
         }
     }
 
-    /// In Live there is no span, so the high would just repeat the reading.
-    fn is_live(&self) -> bool {
-        self.config.window_seconds == WINDOWS[0].1
+    fn columns(&self) -> Columns {
+        Columns::new(&self.config)
     }
 
     fn format_temp(fahrenheit: bool, celsius: f32) -> String {
@@ -268,13 +329,13 @@ impl ThermalEye {
 
         let painter = ui.painter();
         painter.rect_filled(rect, 0.0, TITLE_BG);
-        let mark_height = if compact { 21.0 } else { 26.0 };
+        let mark_height = if compact { 19.5 } else { 26.0 };
         let mark = vec2(mark_height * self.logo.aspect_ratio(), mark_height);
         let mark_rect = Rect::from_min_size(pos2(rect.left() + PAD, rect.center().y - mark.y / 2.0), mark);
         let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
         painter.image(self.logo.id(), mark_rect, uv, Color32::WHITE);
         let text_pos = pos2(mark_rect.right() + 10.0, rect.center().y);
-        let size = if compact { 16.0 } else { 19.0 };
+        let size = if compact { 14.8 } else { 19.0 };
         painter.text(text_pos, Align2::LEFT_CENTER, "Thermal Eye", title(size), TEXT);
 
         let side = if compact { 26.0 } else { 30.0 };
@@ -392,49 +453,65 @@ impl ThermalEye {
 
         let painter = ui.painter();
         let at = |offset: f32| pos2(left + offset, y);
-        let live = self.is_live();
-        caps(painter, at(X_NOW), Align2::RIGHT_CENTER, "NOW", FAINT);
-        if !live {
-            caps(painter, at(X_HIGH), Align2::RIGHT_CENTER, "HIGH", FAINT);
+        let columns = self.columns();
+        caps(painter, at(columns.now), Align2::RIGHT_CENTER, "NOW", FAINT);
+        if let Some(x) = columns.min {
+            caps(painter, at(x), Align2::RIGHT_CENTER, "MIN", FAINT);
         }
-        caps(painter, at(X_AVG), Align2::RIGHT_CENTER, "AVG", FAINT);
-        caps(painter, at(X_BAR_LEFT), Align2::LEFT_CENTER, "USAGE", FAINT);
+        if let Some(x) = columns.max {
+            caps(painter, at(x), Align2::RIGHT_CENTER, "MAX", FAINT);
+        }
+        caps(painter, at(columns.avg), Align2::RIGHT_CENTER, "AVG", FAINT);
+        caps(painter, at(columns.bar_left()), Align2::LEFT_CENTER, "USAGE", FAINT);
         let span = ui.interact(
-            Rect::from_min_max(pos2(left + X_RING, rect.top()), pos2(left + X_PERCENT, rect.bottom())),
+            Rect::from_min_max(pos2(left + X_RING, rect.top()), pos2(left + columns.percent(), rect.bottom())),
             ui.scope_id().with("column-help"),
             Sense::hover(),
         );
-        span.on_hover_text(if live {
-            "NOW: hottest sensor right now\nAVG: mean of the component's sensors right now\nUSAGE: usage right now"
+        span.on_hover_text(self.column_help(&columns));
+    }
+
+    fn column_help(&self, columns: &Columns) -> String {
+        let mut lines = vec!["NOW: hottest sensor right now"];
+        if is_live(&self.config) {
+            lines.extend(["AVG: mean of the component's sensors right now", "USAGE: usage right now"]);
         } else {
-            "NOW: hottest sensor right now\nHIGH: hottest any sensor got in the selected span\n\
-             AVG: mean of the component's sensors over the span\nUSAGE: mean usage over the span"
-        });
+            if columns.min.is_some() {
+                lines.push("MIN: lowest NOW got in the selected span");
+            }
+            if columns.max.is_some() {
+                lines.push("MAX: hottest any sensor got in the selected span");
+            }
+            lines.extend(["AVG: mean of the component's sensors over the span", "USAGE: mean usage over the span"]);
+        }
+        lines.join("\n")
     }
 
     /// Bar and percentage for a usage series; a dash when there is none.
     fn usage_cell(&self, ui: &Ui, rect: Rect, value: Option<f32>, bar_height: f32, color: Color32) {
         let left = rect.left() + PAD;
         let y = rect.center().y;
+        let columns = self.columns();
+        let percent = pos2(left + columns.percent(), y);
         let painter = ui.painter();
         let Some(value) = value else {
-            painter.text(pos2(left + X_PERCENT, y), Align2::RIGHT_CENTER, "—", body(12.5), FAINT);
+            painter.text(percent, Align2::RIGHT_CENTER, "—", body(12.5), FAINT);
             return;
         };
         let bar = Rect::from_min_max(
-            pos2(left + X_BAR_LEFT, y - bar_height / 2.0),
-            pos2(left + X_BAR_RIGHT, y + bar_height / 2.0),
+            pos2(left + columns.bar_left(), y - bar_height / 2.0),
+            pos2(left + columns.bar_right(), y + bar_height / 2.0),
         );
         progress(painter, bar, value / 100.0, color);
         let text = format!("{value:.0}%");
-        painter.text(pos2(left + X_PERCENT, y), Align2::RIGHT_CENTER, text, strong(12.5), TEXT);
+        painter.text(percent, Align2::RIGHT_CENTER, text, strong(12.5), TEXT);
     }
 
     fn graph_dot(&mut self, ui: &mut Ui, rect: Rect, key: &str, color: Color32) {
         if !self.config.graph_open {
             return;
         }
-        let center = pos2(rect.left() + PAD + X_DOT, rect.center().y);
+        let center = pos2(rect.left() + PAD + self.columns().dot(), rect.center().y);
         let hit = Rect::from_center_size(center, Vec2::splat(20.0));
         let response = ui.interact(hit, ui.scope_id().with(("dot", key)), Sense::click()).on_hover_text("Show on graph");
         let selected = self.is_graphed(key);
@@ -480,13 +557,17 @@ impl ThermalEye {
             let fraction = now / critical;
             ring(painter, pos2(left + X_RING, y), 9.0, fraction, heat_ring(now, warn, critical));
         }
-        let now_color = high.now.map_or(FAINT, |v| heat_text(v, warn, critical));
-        painter.text(pos2(left + X_NOW, y), Align2::RIGHT_CENTER, self.temp(high.now), strong(16.0), now_color);
-        if !self.is_live() {
-            let high_color = high.high.map_or(FAINT, |v| heat_text(v, warn, critical));
-            painter.text(pos2(left + X_HIGH, y), Align2::RIGHT_CENTER, self.temp(high.high), strong(13.5), high_color);
+        let tint = |value: Option<f32>| value.map_or(FAINT, |v| heat_text(v, warn, critical));
+        let columns = self.columns();
+        let at = |x: f32| pos2(left + x, y);
+        painter.text(at(columns.now), Align2::RIGHT_CENTER, self.temp(high.now), strong(16.0), tint(high.now));
+        if let Some(x) = columns.min {
+            painter.text(at(x), Align2::RIGHT_CENTER, self.temp(high.low), body(13.5), tint(high.low));
         }
-        painter.text(pos2(left + X_AVG, y), Align2::RIGHT_CENTER, self.temp(avg.avg), body(13.5), MUTED);
+        if let Some(x) = columns.max {
+            painter.text(at(x), Align2::RIGHT_CENTER, self.temp(high.high), strong(13.5), tint(high.high));
+        }
+        painter.text(at(columns.avg), Align2::RIGHT_CENTER, self.temp(avg.avg), body(13.5), MUTED);
 
         let usage = component.usage.and_then(|id| monitor.stats(id, seconds).avg);
         self.usage_cell(ui, rect, usage, 8.0, PURPLE);
@@ -514,11 +595,16 @@ impl ThermalEye {
         let stats = row.temp.map(|id| monitor.stats(id, seconds)).unwrap_or(Stats::default());
         let (warn, critical) = (component.warn, component.critical);
         let tint = |value: Option<f32>| value.map_or(FAINT, |v| heat_text(v, warn, critical));
-        painter.text(pos2(left + X_NOW, y), Align2::RIGHT_CENTER, self.temp(stats.now), strong(12.5), tint(stats.now));
-        if !self.is_live() {
-            painter.text(pos2(left + X_HIGH, y), Align2::RIGHT_CENTER, self.temp(stats.high), body(12.5), tint(stats.high));
+        let columns = self.columns();
+        let at = |x: f32| pos2(left + x, y);
+        painter.text(at(columns.now), Align2::RIGHT_CENTER, self.temp(stats.now), strong(12.5), tint(stats.now));
+        if let Some(x) = columns.min {
+            painter.text(at(x), Align2::RIGHT_CENTER, self.temp(stats.low), body(12.5), tint(stats.low));
         }
-        painter.text(pos2(left + X_AVG, y), Align2::RIGHT_CENTER, self.temp(stats.avg), body(12.5), MUTED);
+        if let Some(x) = columns.max {
+            painter.text(at(x), Align2::RIGHT_CENTER, self.temp(stats.high), body(12.5), tint(stats.high));
+        }
+        painter.text(at(columns.avg), Align2::RIGHT_CENTER, self.temp(stats.avg), body(12.5), MUTED);
 
         if let Some(usage) = row.usage {
             let value = monitor.stats(usage, seconds).avg;
@@ -537,11 +623,15 @@ impl ThermalEye {
         painter.rect_filled(rect, 0.0, NESTED_BG);
         let at = |offset: f32| pos2(left + offset, y);
         caps(painter, at(X_NAME + 12.0), Align2::LEFT_CENTER, "CORE", FAINT);
-        caps(painter, at(X_NOW), Align2::RIGHT_CENTER, "CLOCK", FAINT);
-        if !self.is_live() {
-            caps(painter, at(X_HIGH), Align2::RIGHT_CENTER, "PEAK", FAINT);
+        let columns = self.columns();
+        caps(painter, at(columns.now), Align2::RIGHT_CENTER, "CLOCK", FAINT);
+        if let Some(x) = columns.min {
+            caps(painter, at(x), Align2::RIGHT_CENTER, "LOW", FAINT);
         }
-        caps(painter, at(X_AVG), Align2::RIGHT_CENTER, "POWER", FAINT);
+        if let Some(x) = columns.max {
+            caps(painter, at(x), Align2::RIGHT_CENTER, "PEAK", FAINT);
+        }
+        caps(painter, at(columns.avg), Align2::RIGHT_CENTER, "POWER", FAINT);
     }
 
     fn core_row(&mut self, ui: &mut Ui, width: f32, monitor: &Monitor, core: &Core) {
@@ -555,12 +645,17 @@ impl ThermalEye {
 
         let clock = core.clock.map(|id| monitor.stats(id, seconds)).unwrap_or(Stats::default());
         let power = core.power.and_then(|id| monitor.latest(id));
-        painter.text(pos2(left + X_NOW, y), Align2::RIGHT_CENTER, frequency(clock.now), body(12.0), TEXT);
-        if !self.is_live() {
-            painter.text(pos2(left + X_HIGH, y), Align2::RIGHT_CENTER, frequency(clock.high), body(12.0), MUTED);
+        let columns = self.columns();
+        let at = |x: f32| pos2(left + x, y);
+        painter.text(at(columns.now), Align2::RIGHT_CENTER, frequency(clock.now), body(12.0), TEXT);
+        if let Some(x) = columns.min {
+            painter.text(at(x), Align2::RIGHT_CENTER, frequency(clock.low), body(12.0), MUTED);
+        }
+        if let Some(x) = columns.max {
+            painter.text(at(x), Align2::RIGHT_CENTER, frequency(clock.high), body(12.0), MUTED);
         }
         let power = power.map_or("—".to_owned(), |w| format!("{w:.1} W"));
-        painter.text(pos2(left + X_AVG, y), Align2::RIGHT_CENTER, power, body(12.0), MUTED);
+        painter.text(at(columns.avg), Align2::RIGHT_CENTER, power, body(12.0), MUTED);
 
         let usage = monitor.stats(core.usage, seconds).avg;
         self.usage_cell(ui, rect, usage, 5.0, PURPLE.gamma_multiply(0.8));
@@ -616,23 +711,22 @@ impl ThermalEye {
     }
 
     fn compact_table(&mut self, ui: &mut Ui, width: f32, monitor: &Monitor) {
-        const X_NOW: f32 = 112.0;
-        const X_HIGH: f32 = 150.0;
-        const X_AVG: f32 = 188.0;
-        const X_BAR: f32 = 200.0;
-
         let seconds = self.config.window_seconds;
+        let columns = self.columns();
         let (head, _) = ui.allocate_exact_size(vec2(width, COMPACT_HEAD_H), Sense::hover());
         let left = head.left() + PAD;
         let painter = ui.painter();
         let y = head.center().y + 1.0;
-        let live = self.is_live();
-        caps(painter, pos2(left + X_NOW, y), Align2::RIGHT_CENTER, "NOW", FAINT);
-        if !live {
-            caps(painter, pos2(left + X_HIGH, y), Align2::RIGHT_CENTER, "HIGH", FAINT);
+        let at = |x: f32| pos2(left + x, y);
+        caps(painter, at(columns.now), Align2::RIGHT_CENTER, "NOW", FAINT);
+        if let Some(x) = columns.min {
+            caps(painter, at(x), Align2::RIGHT_CENTER, "MIN", FAINT);
         }
-        caps(painter, pos2(left + X_AVG, y), Align2::RIGHT_CENTER, "AVG", FAINT);
-        caps(painter, pos2(left + X_BAR, y), Align2::LEFT_CENTER, "USAGE", FAINT);
+        if let Some(x) = columns.max {
+            caps(painter, at(x), Align2::RIGHT_CENTER, "MAX", FAINT);
+        }
+        caps(painter, at(columns.avg), Align2::RIGHT_CENTER, "AVG", FAINT);
+        caps(painter, at(columns.compact_bar()), Align2::LEFT_CENTER, "USAGE", FAINT);
 
         for component in self.visible(monitor) {
             let (rect, _) = ui.allocate_exact_size(vec2(width, COMPACT_ROW_H), Sense::hover());
@@ -645,13 +739,18 @@ impl ThermalEye {
 
             let name = component.title.to_uppercase();
             painter.text(pos2(left, y), Align2::LEFT_CENTER, name, strong(11.5), MUTED);
-            painter.text(pos2(left + X_NOW, y), Align2::RIGHT_CENTER, self.temp(high.now), strong(14.0), tint(high.now));
-            if !live {
-                painter.text(pos2(left + X_HIGH, y), Align2::RIGHT_CENTER, self.temp(high.high), strong(12.5), tint(high.high));
+            let at = |x: f32| pos2(left + x, y);
+            painter.text(at(columns.now), Align2::RIGHT_CENTER, self.temp(high.now), strong(14.0), tint(high.now));
+            if let Some(x) = columns.min {
+                painter.text(at(x), Align2::RIGHT_CENTER, self.temp(high.low), body(12.5), tint(high.low));
             }
-            painter.text(pos2(left + X_AVG, y), Align2::RIGHT_CENTER, self.temp(avg), body(12.5), MUTED);
+            if let Some(x) = columns.max {
+                painter.text(at(x), Align2::RIGHT_CENTER, self.temp(high.high), strong(12.5), tint(high.high));
+            }
+            painter.text(at(columns.avg), Align2::RIGHT_CENTER, self.temp(avg), body(12.5), MUTED);
 
-            let bar = Rect::from_min_max(pos2(left + X_BAR, y - 8.0), pos2(rect.right() - PAD, y + 8.0));
+            let bar_left = left + columns.compact_bar();
+            let bar = Rect::from_min_max(pos2(bar_left, y - 8.0), pos2(rect.right() - PAD, y + 8.0));
             match component.usage.and_then(|id| monitor.stats(id, seconds).avg) {
                 Some(usage) => {
                     painter.rect_filled(bar, 4.0, TRACK);
@@ -719,7 +818,7 @@ impl ThermalEye {
         ui.painter().rect_filled(ui.max_rect(), 0.0, BODY_BG);
 
         let compact = self.config.compact;
-        let width = if compact { COMPACT_WIDTH } else { WIDTH };
+        let width = window_width(&self.config);
 
         let notice = current_notice(&monitor, compact);
         let items = self.items(&monitor);

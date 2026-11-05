@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 
 use eframe::egui::ViewportBuilder;
 
-use app::{INITIAL_HEIGHT, COMPACT_WIDTH, ThermalEye, WIDTH};
+use app::{INITIAL_HEIGHT, ThermalEye};
 use config::Config;
 use model::Monitor;
 use topology::Topology;
@@ -42,7 +42,7 @@ fn main() -> eframe::Result {
 
     let config = Config::load();
     let icon = logo::decode(logo::ICON);
-    let width = if config.compact { COMPACT_WIDTH } else { WIDTH };
+    let width = app::window_width(&config);
 
     let mut viewport = ViewportBuilder::default()
         .with_title(window::TITLE)

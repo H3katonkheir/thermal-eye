@@ -12,6 +12,15 @@ use crate::topology::{L3Domain, Topology};
 
 const SCHEMA: &[u8] = include_bytes!("../tests/fixtures/schema.json");
 
+/// Window widths with every column shown, as the default settings have.
+const WIDTH: f32 = 654.0;
+const COMPACT_WIDTH: f32 = 374.0;
+
+/// Where the graph dots sit with the default columns.
+fn dot_x() -> f32 {
+    PAD + Columns::new(&Config::default()).dot()
+}
+
 /// Vertical centre of a component row, by position in the list.
 fn row_y(index: usize) -> f32 {
     TITLE_H + HEADER_H + COMPONENT_H * (index as f32 + 0.5)
@@ -26,10 +35,16 @@ fn full_button(index: usize) -> (f32, f32) {
     button(index, 30.0, WIDTH, TITLE_H)
 }
 
-fn collect_text(shape: &egui::Shape, into: &mut Vec<String>) {
+/// Text, and the part of it left visible by its clip rect, as when a scroll area hides rows.
+fn collect_text(shape: &egui::Shape, clip: Rect, into: &mut Vec<(String, Rect)>) {
     match shape {
-        egui::Shape::Text(text) => into.push(text.galley.text().to_owned()),
-        egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| collect_text(shape, into)),
+        egui::Shape::Text(text) => {
+            let shown = text.visual_bounding_rect().intersect(clip);
+            if shown.is_positive() {
+                into.push((text.galley.text().to_owned(), shown));
+            }
+        }
+        egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| collect_text(shape, clip, into)),
         _ => {}
     }
 }
@@ -41,8 +56,8 @@ struct Harness {
     monitor: Arc<Mutex<Monitor>>,
     commands: Vec<ViewportCommand>,
     copied: Vec<String>,
-    /// Every piece of text drawn in the last frame.
-    drawn: Vec<String>,
+    /// Every piece of text drawn in the last frame, and where.
+    drawn: Vec<(String, Rect)>,
     screen_height: f32,
 }
 
@@ -77,7 +92,7 @@ impl Harness {
 
     fn frame(&mut self, events: Vec<Event>) {
         let mut input = RawInput {
-            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(WIDTH, self.screen_height))),
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(self.screen_width(), self.screen_height))),
             events,
             ..Default::default()
         };
@@ -89,7 +104,7 @@ impl Harness {
         output.textures_delta.clear();
         self.drawn.clear();
         for clipped in &output.shapes {
-            collect_text(&clipped.shape, &mut self.drawn);
+            collect_text(&clipped.shape, clipped.clip_rect, &mut self.drawn);
         }
         for command in &output.platform_output.commands {
             if let egui::OutputCommand::CopyText(text) = command {
@@ -121,6 +136,11 @@ impl Harness {
 
     fn width(&self) -> f32 {
         self.app.requested_size.x
+    }
+
+    /// The window as last sized, or room to spare before the first frame.
+    fn screen_width(&self) -> f32 {
+        if self.width() > 0.0 { self.width() } else { 800.0 }
     }
 }
 
@@ -170,7 +190,7 @@ fn the_graph_button_opens_the_graph_and_dots_choose_its_lines() {
     assert!(widget.app.config.graph_open);
     assert_eq!(widget.height(), closed + GRAPH_CONTROLS_H + GRAPH_PLOT_H);
 
-    widget.click((PAD + X_DOT, row_y(2)));
+    widget.click((dot_x(), row_y(2)));
     assert_eq!(widget.app.config.graphed, ["ram"]);
     let monitor = widget.monitor.clone();
     let lines = widget.app.graph_lines(&monitor.lock().unwrap(), 60, 100);
@@ -182,7 +202,7 @@ fn the_graph_button_opens_the_graph_and_dots_choose_its_lines() {
 fn a_dot_does_not_also_open_the_row() {
     let config = Config { graph_open: true, graphed: Vec::new(), ..Config::default() };
     let mut widget = Harness::new(config);
-    widget.click((PAD + X_DOT, row_y(0)));
+    widget.click((dot_x(), row_y(0)));
     assert_eq!(widget.app.config.graphed, ["cpu"]);
     assert!(widget.app.config.expanded.is_empty());
 }
@@ -287,7 +307,7 @@ fn start_with_windows_asks_only_when_the_setting_changes() {
     let mut widget = Harness::new(Config::default());
     widget.click(full_button(6));
     let top = widget.height() - BOTTOM_PAD - widget.app.settings_height();
-    let (y, left) = (top + SETTINGS_ROW_H * 2.5, PAD + X_NAME + 150.0);
+    let (y, left) = (top + SETTINGS_ROW_H * 3.5, PAD + X_NAME + 150.0);
 
     widget.click((left + 20.0, y));
     assert!(widget.inbox.try_recv().is_err(), "already off");
@@ -398,10 +418,10 @@ fn settings_can_check_for_updates_and_turn_checks_off() {
     let top = widget.height() - BOTTOM_PAD - widget.app.settings_height();
     let left = PAD + X_NAME + 150.0;
 
-    widget.click((left + 40.0, top + SETTINGS_ROW_H * 5.5));
+    widget.click((left + 40.0, top + SETTINGS_ROW_H * 6.5));
     assert!(matches!(widget.inbox.try_recv(), Ok(Command::CheckForUpdate)));
 
-    widget.click((left + 20.0, top + SETTINGS_ROW_H * 4.5));
+    widget.click((left + 20.0, top + SETTINGS_ROW_H * 5.5));
     assert!(!widget.app.config.check_updates);
     assert!(matches!(widget.inbox.try_recv(), Ok(Command::SetAutomaticUpdates(false))));
 }
@@ -413,7 +433,7 @@ fn nothing_can_be_clicked_while_an_update_is_in_progress() {
     widget.frame(Vec::new());
     widget.click(full_button(6));
     let top = widget.height() - BOTTOM_PAD - widget.app.settings_height();
-    widget.click((PAD + X_NAME + 190.0, top + SETTINGS_ROW_H * 5.5));
+    widget.click((PAD + X_NAME + 190.0, top + SETTINGS_ROW_H * 6.5));
     assert!(widget.inbox.try_recv().is_err());
 }
 
@@ -495,14 +515,14 @@ fn copy_details_puts_the_report_on_the_clipboard() {
     widget.frame(Vec::new());
     widget.click(full_button(6));
     let top = widget.height() - BOTTOM_PAD - widget.app.settings_height();
-    widget.click((PAD + X_NAME + 150.0 + 40.0, top + SETTINGS_ROW_H * 6.5));
+    widget.click((PAD + X_NAME + 150.0 + 40.0, top + SETTINGS_ROW_H * 7.5));
     assert_eq!(widget.copied.len(), 1);
     assert!(widget.copied[0].contains("AMD Ryzen 9 9950X3D"));
 }
 
 impl Harness {
     fn shows(&self, text: &str) -> bool {
-        self.drawn.iter().any(|drawn| drawn == text)
+        self.drawn.iter().any(|(drawn, _)| drawn == text)
     }
 
     /// Rests the pointer somewhere, with tooltips set to appear at once.
@@ -541,7 +561,7 @@ fn the_tooltip_only_appears_over_the_text_itself() {
 fn hovering_text_that_fits_adds_nothing() {
     let mut widget = Harness::new(Config::default());
     widget.hover((PAD + X_NAME + 20.0, row_y(1) + 9.0));
-    assert_eq!(widget.drawn.iter().filter(|text| *text == "RX 9070 XT").count(), 1);
+    assert_eq!(widget.drawn.iter().filter(|(text, _)| text == "RX 9070 XT").count(), 1);
 }
 
 #[test]
@@ -557,18 +577,18 @@ fn a_shortened_sensor_name_also_shows_in_full() {
 }
 
 #[test]
-fn live_shows_now_and_avg_but_not_high() {
+fn live_shows_now_and_avg_but_not_min_or_max() {
     let mut widget = Harness::new(Config { window_seconds: LIVE, ..Config::default() });
     widget.frame(Vec::new());
     assert!(widget.shows("NOW") && widget.shows("AVG") && widget.shows("USAGE"));
-    assert!(!widget.shows("HIGH") && !widget.shows("TEMP"));
+    assert!(!widget.shows("MIN") && !widget.shows("MAX") && !widget.shows("TEMP"));
 }
 
 #[test]
-fn other_spans_keep_all_three_columns() {
+fn other_spans_keep_all_four_columns() {
     let mut widget = Harness::new(Config::default());
     widget.frame(Vec::new());
-    assert!(widget.shows("NOW") && widget.shows("HIGH") && widget.shows("AVG"));
+    assert!(widget.shows("NOW") && widget.shows("MIN") && widget.shows("MAX") && widget.shows("AVG"));
 }
 
 #[test]
@@ -576,7 +596,7 @@ fn live_applies_to_the_compact_view_too() {
     let mut widget = Harness::new(Config { window_seconds: LIVE, compact: true, ..Config::default() });
     widget.frame(Vec::new());
     assert!(widget.shows("NOW") && widget.shows("AVG"));
-    assert!(!widget.shows("HIGH") && !widget.shows("TEMP"));
+    assert!(!widget.shows("MIN") && !widget.shows("MAX") && !widget.shows("TEMP"));
 }
 
 #[test]
@@ -585,7 +605,7 @@ fn live_drops_the_redundant_peak_clock_but_keeps_power() {
     let mut widget = Harness::new(config);
     widget.frame(Vec::new());
     assert!(widget.shows("CLOCK") && widget.shows("POWER"));
-    assert!(!widget.shows("PEAK"));
+    assert!(!widget.shows("LOW") && !widget.shows("PEAK"));
 }
 
 #[test]
@@ -650,3 +670,159 @@ fn stopped_fans_are_hidden_but_a_gpu_in_zero_rpm_mode_is_not() {
     assert_eq!(extra_values(&monitor, &system), [("Fan".to_owned(), "0 RPM".to_owned())]);
 }
 
+
+#[test]
+fn the_default_widths_show_every_column() {
+    assert_eq!(window_width(&Config::default()), WIDTH);
+    assert_eq!(window_width(&Config { compact: true, ..Config::default() }), COMPACT_WIDTH);
+}
+
+#[test]
+fn min_shows_how_low_the_hottest_sensor_got() {
+    let widget = Harness::new(Config::default());
+    let mut monitor = widget.monitor.lock().unwrap();
+    let cpu = monitor.components[0].high;
+    for value in [52.0, 38.0, 61.0] {
+        monitor.history.set(cpu, value);
+        monitor.history.commit();
+    }
+    let stats = monitor.stats(cpu, 300);
+    assert_eq!((stats.low, stats.high, stats.now), (Some(38.0), Some(61.0), Some(61.0)));
+}
+
+#[test]
+fn the_core_dropdown_shows_the_lowest_clock_under_min() {
+    let mut widget = Harness::new(Config { expanded: vec!["cpu".into()], ..Config::default() });
+    widget.frame(Vec::new());
+    assert!(widget.shows("CLOCK") && widget.shows("LOW") && widget.shows("PEAK") && widget.shows("POWER"));
+}
+
+/// Clicks the Min or Max chip in the settings panel.
+fn toggle_column(widget: &mut Harness, index: usize) {
+    let top = widget.height() - BOTTOM_PAD - widget.app.settings_height();
+    widget.click((PAD + X_NAME + 150.0 + index as f32 * 46.0 + 20.0, top + SETTINGS_ROW_H * 2.5));
+}
+
+#[test]
+fn hiding_min_and_max_narrows_the_window() {
+    let mut widget = Harness::new(Config::default());
+    widget.click(full_button(6));
+    assert_eq!(widget.width(), WIDTH);
+
+    toggle_column(&mut widget, 0);
+    assert!(!widget.app.config.columns.min);
+    assert!(!widget.shows("MIN") && widget.shows("MAX"));
+    assert_eq!(widget.width(), WIDTH - TEMP_STEP);
+
+    toggle_column(&mut widget, 1);
+    assert!(!widget.app.config.columns.max);
+    assert!(!widget.shows("MIN") && !widget.shows("MAX"));
+    assert_eq!(widget.width(), WIDTH - 2.0 * TEMP_STEP);
+
+    toggle_column(&mut widget, 0);
+    assert!(widget.shows("MIN") && !widget.shows("MAX"));
+    assert_eq!(widget.width(), WIDTH - TEMP_STEP);
+}
+
+#[test]
+fn hidden_columns_also_narrow_the_compact_view() {
+    let columns = |min, max| config::Columns { min, max };
+    let width = |columns| window_width(&Config { compact: true, columns, ..Config::default() });
+    assert_eq!(width(columns(false, true)), COMPACT_WIDTH - COMPACT_STEP);
+    assert_eq!(width(columns(true, false)), COMPACT_WIDTH - COMPACT_STEP);
+    assert_eq!(width(columns(false, false)), COMPACT_WIDTH - 2.0 * COMPACT_STEP);
+
+    let mut widget = Harness::new(Config { compact: true, columns: columns(false, true), ..Config::default() });
+    assert_eq!(widget.width(), COMPACT_WIDTH - COMPACT_STEP);
+    widget.frame(Vec::new());
+    assert!(!widget.shows("MIN") && widget.shows("MAX"));
+}
+
+#[test]
+fn live_takes_no_room_for_min_and_max() {
+    let hidden = config::Columns { min: false, max: false };
+    for compact in [false, true] {
+        let live = Config { compact, window_seconds: LIVE, ..Config::default() };
+        let narrow = Config { compact, columns: hidden.clone(), ..Config::default() };
+        assert_eq!(window_width(&live), window_width(&narrow));
+    }
+}
+
+#[test]
+fn the_column_help_lists_only_the_columns_shown() {
+    let config = Config { columns: config::Columns { min: false, max: true }, ..Config::default() };
+    let widget = Harness::new(config);
+    let help = widget.app.column_help(&widget.app.columns());
+    assert!(help.contains("MAX:") && !help.contains("MIN:"));
+}
+
+/// Every text drawn fits the window and none overlaps another.
+fn assert_tidy(widget: &Harness, case: &str) {
+    let width = widget.width();
+    let drawn: Vec<_> = widget.drawn.iter().filter(|(text, _)| !text.trim().is_empty()).collect();
+    for (text, rect) in &drawn {
+        assert!(rect.left() >= PAD / 2.0 && rect.right() <= width - PAD / 2.0, "{case}: {text:?} reaches the edge of a {width} wide window");
+    }
+    for (index, (a, a_rect)) in drawn.iter().enumerate() {
+        for (b, b_rect) in &drawn[index + 1..] {
+            assert!(!a_rect.intersects(*b_rect), "{case}: {a:?} overlaps {b:?}");
+        }
+    }
+}
+
+/// A named state for the monitor, to see the notice it brings up.
+type Situation = (&'static str, fn(&mut Monitor));
+
+#[test]
+fn every_layout_fits_its_text() {
+    let notices: [Situation; 4] = [
+        ("healthy", |m| m.link = Link::Connected { elevated: true }),
+        ("no admin", |m| m.link = Link::Connected { elevated: false }),
+        ("no driver", |m| {
+            m.link = Link::Connected { elevated: true };
+            m.driver_missing = true;
+        }),
+        ("update", |m| {
+            m.link = Link::Connected { elevated: true };
+            m.update = UpdateState::Ready("10.10.10".into());
+        }),
+    ];
+    for compact in [false, true] {
+        for (min, max) in [(true, true), (true, false), (false, true), (false, false)] {
+            for window_seconds in [LIVE, 300] {
+                for (notice, set_up) in notices {
+                    for seen in [None, Some("0.0.1")] {
+                        let config = Config {
+                            compact,
+                            columns: config::Columns { min, max },
+                            window_seconds,
+                            expanded: vec!["cpu".into(), "system".into()],
+                            seen_version: seen.map(str::to_owned),
+                            ..Config::default()
+                        };
+                        let mut widget = Harness::new(config);
+                        set_up(&mut widget.monitor.lock().unwrap());
+                        widget.app.settings_open = !compact;
+                        widget.frame(Vec::new());
+                        widget.frame(Vec::new());
+                        let case = format!("compact {compact}, min {min}, max {max}, {window_seconds}s, {notice}, seen {seen:?}");
+                        assert_tidy(&widget, &case);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn the_compact_title_clears_the_buttons_at_every_width() {
+    for (min, max) in [(true, true), (true, false), (false, false)] {
+        let config = Config { compact: true, columns: config::Columns { min, max }, ..Config::default() };
+        let mut widget = Harness::new(config);
+        widget.frame(Vec::new());
+        let title = widget.drawn.iter().find(|(text, _)| text == "Thermal Eye").unwrap().1;
+        let (side, gap, buttons) = (26.0, 6.0, 4.0);
+        let first_button = widget.width() - PAD - buttons * side - (buttons - 1.0) * gap;
+        assert!(title.right() + gap <= first_button, "min {min}, max {max}: the title runs under the buttons");
+    }
+}

@@ -19,11 +19,11 @@
 
 ## What it does
 
-- **Every component in one place:** current, high and average temperature, plus
+- **Every component in one place:** current, min, max and average temperature, plus
   average usage, for your CPU, graphics card, RAM, drives and motherboard.
 - **History graph:** choose what to plot, from whole components down to a single core
   or sensor, over anything from the last minute to the last 24 hours.
-- **Every core:** open the CPU row to see each core's clock, peak, power and usage,
+- **Every core:** open the CPU row to see each core's clock, low, peak, power and usage,
   grouped by die.
 - **Compact view:** a small window that stays out of the way, and can stay on top.
 - **Warnings at a glance:** readings turn amber or red as they near each part's limits.
@@ -60,14 +60,17 @@ in case other apps use it, and can be removed the same way.
 | Column | Meaning |
 | --- | --- |
 | **Now** | The hottest of the component's sensors right now |
-| **High** | The hottest any of its sensors got during the selected span |
+| **Min** | The lowest Now got during the selected span |
+| **Max** | The hottest any of its sensors got during the selected span |
 | **Avg** | The mean of its sensors over the selected span |
 | **Usage** | Mean usage over the selected span |
 
 The span selector, from Live to 24h, controls these figures and the graph together.
+Live has no span, so it leaves out Min and Max. To save room, either can be hidden
+under **Show columns** in Settings, and the window narrows to match.
 History is kept in memory, so it starts again when the app closes.
 
-- **CPU temperature:** High includes Tctl, the value your fans follow. Avg uses only
+- **CPU temperature:** Max includes Tctl, the value your fans follow. Avg uses only
   the die sensors, because Tctl can read well above them.
 - **Core temperature:** Ryzen CPUs report temperature per die rather than per core, so
   it appears on the CCD rows, and core rows show clock, power and usage instead.

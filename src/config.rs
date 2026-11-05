@@ -18,6 +18,20 @@ impl Default for Metrics {
     }
 }
 
+/// The table columns that can be hidden to save room.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Columns {
+    pub min: bool,
+    pub max: bool,
+}
+
+impl Default for Columns {
+    fn default() -> Self {
+        Self { min: true, max: true }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -32,6 +46,7 @@ pub struct Config {
     /// Components and sensors drawn on the graph.
     pub graphed: Vec<String>,
     pub metrics: Metrics,
+    pub columns: Columns,
     pub hidden: Vec<String>,
     /// Look for new versions at launch and once a day.
     pub check_updates: bool,
@@ -51,6 +66,7 @@ impl Default for Config {
             expanded: Vec::new(),
             graphed: vec!["cpu".into(), "gpu0".into()],
             metrics: Metrics::default(),
+            columns: Columns::default(),
             hidden: Vec::new(),
             check_updates: true,
             seen_version: None,

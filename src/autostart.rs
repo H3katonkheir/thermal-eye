@@ -1,9 +1,9 @@
-//! "Start with Windows": a per-user Run entry starts the widget at sign-in, and a
-//! scheduled task lets it start the elevated helper without a UAC prompt.
+//! Starting without prompts. Two independent pieces:
 //!
-//! The helper does the privileged half (see `sensors/Autostart.cs`). The task runs
-//! a copy in Program Files, never the one beside this exe, which unelevated
-//! programs could replace.
+//! - A scheduled task, registered by the installer, lets the widget start the
+//!   elevated helper with no UAC prompt. It only applies to an installed copy:
+//!   a helper outside Program Files could be replaced by any program.
+//! - "Start with Windows" is a per-user Run entry, which needs no elevation.
 
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -35,26 +35,14 @@ fn schtasks(args: &[&str]) -> bool {
         .is_ok_and(|status| status.success())
 }
 
-fn task_exists() -> bool {
-    schtasks(&["/query", "/tn", TASK])
-}
-
 pub fn run_task() -> bool {
     schtasks(&["/run", "/tn", TASK])
 }
 
-fn installed_helper(file_name: &str) -> Option<PathBuf> {
-    Some(PathBuf::from(std::env::var_os("ProgramFiles")?).join("ThermalEye").join(file_name))
-}
-
-/// True if the task can start this version of the helper. A copy left behind by
-/// an older build is not used: the next elevated start refreshes it.
-pub fn task_ready(bundled: &Path) -> bool {
-    let name = bundled.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-    let same = installed_helper(name).and_then(|path| std::fs::read(path).ok()).is_some_and(|installed| {
-        std::fs::read(bundled).is_ok_and(|current| current == installed)
-    });
-    same && task_exists()
+/// True if the task can be used to start `helper`.
+pub fn task_ready(helper: &Path) -> bool {
+    let installed = std::env::var_os("ProgramFiles").is_some_and(|root| helper.starts_with(root));
+    installed && schtasks(&["/query", "/tn", TASK])
 }
 
 fn run_entry() -> Option<String> {
@@ -81,7 +69,7 @@ fn current_command() -> Option<String> {
     Some(format!("\"{}\"", std::env::current_exe().ok()?.display()))
 }
 
-pub fn write_run_entry() -> bool {
+fn write_run_entry() -> bool {
     let Some(command) = current_command() else { return false };
     let text: Vec<u16> = command.encode_utf16().chain(Some(0)).collect();
     let status = unsafe {
@@ -97,16 +85,18 @@ pub fn write_run_entry() -> bool {
     status == ERROR_SUCCESS
 }
 
-pub fn delete_run_entry() {
+/// Turns "Start with Windows" on or off, returning whether that worked.
+pub fn set(enable: bool) -> bool {
+    if enable {
+        return write_run_entry();
+    }
     let _ = unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN_KEY, RUN_VALUE) };
+    run_entry().is_none()
 }
 
-/// Whether autostart is on. Follows the app if its folder has moved.
-pub fn check_enabled() -> bool {
+/// Whether "Start with Windows" is on. Follows the app if its folder has moved.
+pub fn is_enabled() -> bool {
     let Some(entry) = run_entry() else { return false };
-    if !task_exists() {
-        return false;
-    }
     if current_command().is_some_and(|command| command != entry) {
         write_run_entry();
     }

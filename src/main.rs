@@ -4,6 +4,7 @@ mod app;
 mod autostart;
 mod bridge;
 mod config;
+mod driver;
 mod graph;
 mod history;
 mod logo;
@@ -24,11 +25,7 @@ use topology::Topology;
 
 fn main() -> eframe::Result {
     if let Some(enable) = autostart_request() {
-        std::process::exit(match bridge::apply_autostart(enable) {
-            bridge::Change::Done => 0,
-            bridge::Change::Declined => 2,
-            bridge::Change::Failed => 1,
-        });
+        std::process::exit(if autostart::set(enable) { 0 } else { 1 });
     }
 
     let replay = replay_path();
@@ -49,13 +46,11 @@ fn main() -> eframe::Result {
     if config.always_on_top {
         viewport = viewport.with_always_on_top();
     }
-    if let Some(position) = config.position.filter(|p| window::is_on_screen(*p)) {
-        viewport = viewport.with_position(position);
-    }
+    let position = config.position.filter(|p| window::is_on_screen(*p));
 
     let options = eframe::NativeOptions {
         viewport,
-        centered: config.position.is_none(),
+        centered: position.is_none(),
         ..Default::default()
     };
 
@@ -66,6 +61,9 @@ fn main() -> eframe::Result {
             theme::install_fonts(&creation.egui_ctx);
             theme::install_style(&creation.egui_ctx);
             window::round_corners(creation);
+            if let Some(position) = position {
+                window::move_to(creation, position);
+            }
 
             let ctx = creation.egui_ctx.clone();
             let monitor = Arc::new(Mutex::new(Monitor::new(Topology::read())));

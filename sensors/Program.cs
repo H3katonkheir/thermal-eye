@@ -32,8 +32,8 @@ static class Helper
             return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
         }
 
-        if (args.Contains("--install-autostart")) return Autostart.Install();
-        if (args.Contains("--remove-autostart")) return Autostart.Remove();
+        if (args.Contains("--register-task")) return TaskSetup.Register();
+        if (args.Contains("--unregister-task")) return TaskSetup.Unregister();
         if (Arg("--dump") is { } dumpPath) return Dump(dumpPath);
         if (Arg("--record") is { } recordPath) return Record(recordPath, int.TryParse(Arg("--seconds"), out var s) ? s : 60);
         if (Arg("--pipe") is not { } pipeName) return 2;
@@ -46,8 +46,6 @@ static class Helper
             using var pipe = new NamedPipeClientStream(
                 ".", pipeName, PipeDirection.Out, PipeOptions.None, TokenImpersonationLevel.Anonymous);
             pipe.Connect(15000);
-            if (new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator))
-                Autostart.Sync();
             var computer = Open();
             try { Stream(pipe, computer, interval); }
             finally { computer.Close(); }

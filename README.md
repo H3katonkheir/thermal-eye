@@ -4,47 +4,38 @@ A compact Windows desktop widget for system temperatures and usage. For each
 component it shows the current, high and average temperature plus average usage,
 with an optional history graph and per-core and per-sensor dropdowns.
 
-## Running
+## Installing
 
-```powershell
-.\build.ps1
-.\dist\thermal-eye.exe
-```
+Run `ThermalEyeSetup-<version>.exe`. It asks for permission once, and nothing asks
+again after that, including at sign-in. There is nothing else to install first:
+.NET is bundled, and setup offers to fetch the PawnIO driver if it is missing.
 
-Windows asks for permission at launch: only the small sensor helper runs as
-administrator, the window itself does not. Decline, or start with `--no-elevate`,
-and the widget still shows usage and GPU temperature, and offers **Grant access**.
-
-Keep `thermal-eye.exe` and `thermal-eye-sensors.exe` in the same folder.
-
-### Start with Windows
-
-Turn this on under Settings, or with `thermal-eye.exe --autostart on`. It asks for
-permission once, and from then on the widget opens at sign-in and at every launch
-with no prompt. Turning it off (`--autostart off`) also asks once.
-
-It sets up three things:
-
-| What | Where |
-| --- | --- |
-| A startup entry for the widget | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value `Thermal Eye` |
-| A task with no schedule, run only by the widget | Task Scheduler, `Thermal Eye Sensors` |
-| A copy of the sensor helper | `C:\Program Files\ThermalEye` |
-
-The copy exists for safety: the task runs as administrator, so it must point at a
-file that ordinary programs cannot replace. If the widget is running when you turn
-this off, the copy stays until the next launch, which removes it.
-
-After rebuilding the helper, the next launch prompts once and refreshes the copy.
-Turn autostart off before deleting or moving the app for good.
+The installer is not code-signed yet, so Windows may warn about an unrecognised
+app. Choose **More info**, then **Run anyway**.
 
 ### Requirements
 
-- Windows 11 (Windows 10 should work, with square corners)
-- [.NET 10 runtime](https://dotnet.microsoft.com/download) or newer, for the sensor helper
-- [PawnIO](https://pawnio.eu), the signed driver used for CPU, RAM and motherboard sensors
+- Windows 11, 64-bit (Windows 10 should work, with square corners)
+- [PawnIO](https://pawnio.eu), the signed driver used for CPU, RAM and motherboard
+  sensors. Without it the widget still shows GPU temperature, drive temperatures and
+  usage, and offers the download.
 
-Building also needs Rust and the .NET SDK.
+**FACEIT:** its anti-cheat blocks PawnIO, so anyone who plays on FACEIT should leave
+that option unticked. Uninstalling Thermal Eye leaves PawnIO in place, since other
+apps may use it. Remove it from Windows' installed apps list if you no longer need it.
+
+### What gets installed
+
+| What | Where |
+| --- | --- |
+| The app | `C:\Program Files\ThermalEye` |
+| A task with no schedule, run only by the widget | Task Scheduler, `Thermal Eye Sensors` |
+| A startup entry, if **Start with Windows** is on | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value `Thermal Eye` |
+
+Only the small sensor helper runs as administrator, the window itself does not. The
+task is what lets it start without a prompt, and that is why the app always goes in
+Program Files: an elevated task must not point at a file ordinary programs could
+replace. **Start with Windows** can be changed at any time under Settings.
 
 ## What the columns mean
 
@@ -86,8 +77,11 @@ its own sensors report; the others use fixed values in `src/model.rs`.
 | `src/model.rs` | Turns the raw sensor list into components |
 | `src/history.rs` | Time series and statistics |
 | `src/bridge.rs` | Starts the helper, reads its pipe |
+| `src/autostart.rs` | The scheduled task and Start with Windows |
+| `src/driver.rs` | Checks for the PawnIO driver |
 | `src/topology.rs` | Core and L3 layout from Windows |
 | `sensors/` | C# helper around LibreHardwareMonitorLib |
+| `installer/` | Inno Setup script |
 
 Why a C# helper in a Rust app: reading these sensors means knowing the register
 layouts of each CPU, Super I/O chip and DIMM sensor, and LibreHardwareMonitor is
@@ -96,9 +90,18 @@ from the UI: data only flows out of it, and it exits when the UI closes.
 
 ## Development
 
+Building needs Rust, the .NET SDK and
+[Inno Setup 6](https://jrsoftware.org/isinfo.php) (`winget install JRSoftware.InnoSetup`).
+
 ```powershell
 cargo test
+.uild.ps1
 ```
+
+`build.ps1` puts the app and installer in `dist`. Running `dist	hermal-eye.exe`
+directly works too, but it asks for permission each launch, because the scheduled
+task only serves the copy in Program Files. Start it with `--no-elevate` to skip the
+prompt and run with limited sensors.
 
 The UI tests run the real widget headlessly and click through it.
 

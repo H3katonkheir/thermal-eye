@@ -8,7 +8,7 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use eframe::egui;
 use windows::Win32::Foundation::{
@@ -24,26 +24,29 @@ use windows::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS,
     PIPE_TYPE_BYTE, PIPE_WAIT,
 };
-use windows::Win32::System::Threading::{
-    CreateEventW, GetExitCodeProcess, INFINITE, WaitForMultipleObjects, WaitForSingleObject,
-};
+use windows::Win32::System::Threading::{CreateEventW, WaitForMultipleObjects, WaitForSingleObject};
 use windows::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
 use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
 use windows::core::{Error, PCWSTR, w};
 
 use crate::autostart;
+use crate::driver;
 use crate::model::{Link, Monitor};
 
 const HELPER: &str = "thermal-eye-sensors.exe";
 const CONNECT_TIMEOUT_MS: u32 = 30_000;
 /// The task needs no one to answer a prompt, so silence means it is not working.
 const TASK_CONNECT_TIMEOUT_MS: u32 = 10_000;
+const DRIVER_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 
+#[derive(Clone, Copy)]
 pub enum Command {
     /// Start, or restart, the helper with full hardware access.
     Connect,
     /// Turn "Start with Windows" on or off.
     SetAutostart(bool),
+    /// Show where to get the driver.
+    OpenDriverPage,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -66,11 +69,9 @@ enum Ended {
     Failed(String),
 }
 
-#[derive(Clone)]
 struct Shared {
     monitor: Arc<Mutex<Monitor>>,
     ctx: egui::Context,
-    commands: Sender<Command>,
 }
 
 impl Shared {
@@ -78,20 +79,36 @@ impl Shared {
         change(&mut self.monitor.lock().unwrap());
         self.ctx.request_repaint();
     }
+
+    /// Carries out a request that does not affect the helper connection.
+    fn handle(&self, command: Command) {
+        match command {
+            Command::Connect => {}
+            Command::OpenDriverPage => driver::open_download_page(),
+            Command::SetAutostart(enable) => {
+                if autostart::set(enable) {
+                    self.update(|monitor| monitor.autostart = enable);
+                }
+            }
+        }
+    }
 }
 
 /// Starts the background thread that keeps the helper running.
 pub fn start(monitor: Arc<Mutex<Monitor>>, ctx: egui::Context, elevate: bool) -> Sender<Command> {
     let (commands, inbox) = channel();
-    let shared = Shared { monitor, ctx, commands: commands.clone() };
+    let shared = Shared { monitor, ctx };
     std::thread::spawn(move || {
         let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) };
-        let enabled = autostart::check_enabled();
-        shared.update(|monitor| monitor.autostart.enabled = enabled);
+        let enabled = autostart::is_enabled();
+        shared.update(|monitor| monitor.autostart = enabled);
 
         let mut elevate = elevate;
         let mut try_task = true;
         loop {
+            let missing = !driver::is_installed();
+            shared.update(|monitor| monitor.driver_missing = missing);
+
             let task_ready = || helper_path().is_some_and(|helper| autostart::task_ready(&helper));
             let launch = match (elevate, try_task) {
                 (false, _) => Launch::Plain,
@@ -110,7 +127,7 @@ pub fn start(monitor: Arc<Mutex<Monitor>>, ctx: egui::Context, elevate: bool) ->
                     loop {
                         match inbox.recv() {
                             Ok(Command::Connect) => break,
-                            Ok(Command::SetAutostart(on)) => change_autostart(&shared, on),
+                            Ok(command) => shared.handle(command),
                             Err(_) => return,
                         }
                     }
@@ -120,60 +137,6 @@ pub fn start(monitor: Arc<Mutex<Monitor>>, ctx: egui::Context, elevate: bool) ->
         }
     });
     commands
-}
-
-/// The outcome of asking Windows to change the autostart setup.
-pub enum Change {
-    Done,
-    Declined,
-    Failed,
-}
-
-/// Runs the elevated half, then the per-user half. Blocks while the prompt is up.
-pub fn apply_autostart(enable: bool) -> Change {
-    let Some(helper) = helper_path() else { return Change::Failed };
-    let argument = if enable { "--install-autostart" } else { "--remove-autostart" };
-    let process = match launch_helper(&helper, argument, true) {
-        Ok(process) => process,
-        Err(e) if e.code() == ERROR_CANCELLED.to_hresult() => return Change::Declined,
-        Err(_) => return Change::Failed,
-    };
-    let mut exit_code = 1;
-    unsafe {
-        WaitForSingleObject(process.0, INFINITE);
-        let _ = GetExitCodeProcess(process.0, &mut exit_code);
-    }
-    if exit_code != 0 {
-        return Change::Failed;
-    }
-    if !enable {
-        autostart::delete_run_entry();
-    } else if !autostart::write_run_entry() {
-        return Change::Failed;
-    }
-    Change::Done
-}
-
-/// On a thread of its own: the UAC prompt must not hold up the sensor stream.
-fn change_autostart(shared: &Shared, enable: bool) {
-    let shared = shared.clone();
-    shared.update(|monitor| monitor.autostart.busy = true);
-    std::thread::spawn(move || {
-        let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) };
-        let done = matches!(apply_autostart(enable), Change::Done);
-        let mut limited = false;
-        shared.update(|monitor| {
-            monitor.autostart.busy = false;
-            if done {
-                monitor.autostart.enabled = enable;
-            }
-            limited = monitor.link == Link::Connected { elevated: false };
-        });
-        // The task can now give a limited session full access with no prompt.
-        if done && enable && limited {
-            let _ = shared.commands.send(Command::Connect);
-        }
-    });
 }
 
 /// Replays a stream captured with `thermal-eye-sensors --record`. Everything is
@@ -207,7 +170,7 @@ fn helper_path() -> Option<PathBuf> {
         return Some(installed);
     }
     // Running from target/{debug,release} during development.
-    let dev = dir.parent()?.parent()?.join("sensors/bin/Release/net10.0-windows").join(HELPER);
+    let dev = dir.parent()?.parent()?.join("sensors/bin/Release/net10.0-windows/win-x64").join(HELPER);
     dev.exists().then_some(dev)
 }
 
@@ -329,6 +292,15 @@ fn read_stream(
     const LOST: &str = "The sensor helper stopped";
     let mut chunk = vec![0u8; 64 * 1024];
     let mut line = Vec::with_capacity(64 * 1024);
+    let mut next_driver_check = Instant::now();
+
+    let stop_reading = |overlapped: &OVERLAPPED| {
+        let mut ignored = 0;
+        unsafe {
+            let _ = CancelIoEx(pipe.0, Some(overlapped));
+            let _ = GetOverlappedResult(pipe.0, overlapped, &mut ignored, true);
+        }
+    };
 
     loop {
         let started = unsafe { ReadFile(pipe.0, Some(&mut chunk), None, Some(overlapped)) };
@@ -347,13 +319,19 @@ fn read_stream(
             }
             match inbox.try_recv() {
                 Err(TryRecvError::Empty) => {}
-                Ok(Command::SetAutostart(on)) => change_autostart(shared, on),
                 Ok(Command::Connect) | Err(TryRecvError::Disconnected) => {
-                    let mut ignored = 0;
-                    unsafe {
-                        let _ = CancelIoEx(pipe.0, Some(overlapped));
-                        let _ = GetOverlappedResult(pipe.0, overlapped, &mut ignored, true);
-                    }
+                    stop_reading(overlapped);
+                    return Ended::Restart;
+                }
+                Ok(command) => shared.handle(command),
+            }
+
+            // The helper only finds the driver at startup, so a driver installed
+            // while the widget is open needs a fresh helper.
+            if Instant::now() >= next_driver_check {
+                next_driver_check = Instant::now() + DRIVER_CHECK_INTERVAL;
+                if shared.monitor.lock().unwrap().driver_missing && driver::is_installed() {
+                    stop_reading(overlapped);
                     return Ended::Restart;
                 }
             }

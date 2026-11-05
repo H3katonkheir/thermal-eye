@@ -273,11 +273,34 @@ fn start_with_windows_asks_only_when_the_setting_changes() {
 
     widget.click((left + 46.0 + 20.0, y));
     assert!(matches!(widget.inbox.try_recv(), Ok(Command::SetAutostart(true))));
+}
 
-    widget.monitor.lock().unwrap().autostart.busy = true;
+#[test]
+fn a_missing_driver_offers_the_download_page() {
+    let mut widget = Harness::new(Config::default());
+    let full = widget.height();
+    {
+        let mut monitor = widget.monitor.lock().unwrap();
+        monitor.link = Link::Connected { elevated: true };
+        monitor.driver_missing = true;
+    }
     widget.frame(Vec::new());
-    widget.click((left + 46.0 + 20.0, y));
-    assert!(widget.inbox.try_recv().is_err(), "no second request while one is pending");
+    assert_eq!(widget.height(), full + BANNER_H, "the notice takes a row");
+    widget.click((WIDTH - PAD - 48.0, TITLE_H + BANNER_H / 2.0));
+    assert!(matches!(widget.inbox.try_recv(), Ok(Command::OpenDriverPage)));
+}
+
+#[test]
+fn asking_for_admin_access_comes_before_the_driver_notice() {
+    let mut widget = Harness::new(Config::default());
+    {
+        let mut monitor = widget.monitor.lock().unwrap();
+        monitor.link = Link::Connected { elevated: false };
+        monitor.driver_missing = true;
+    }
+    widget.frame(Vec::new());
+    widget.click((WIDTH - PAD - 48.0, TITLE_H + BANNER_H / 2.0));
+    assert!(matches!(widget.inbox.try_recv(), Ok(Command::Connect)));
 }
 
 #[test]

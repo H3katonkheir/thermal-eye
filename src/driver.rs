@@ -1,0 +1,27 @@
+//! PawnIO, the signed kernel driver that CPU, RAM and motherboard sensors are read
+//! through. It is a separate product, so it may not be on the machine.
+
+use windows::Win32::Foundation::ERROR_SUCCESS;
+use windows::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_ANY, RegGetValueW};
+use windows::Win32::UI::Shell::ShellExecuteW;
+use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+use windows::core::w;
+
+pub fn is_installed() -> bool {
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            w!(r"SYSTEM\CurrentControlSet\Services\PawnIO"),
+            w!("ImagePath"),
+            RRF_RT_ANY,
+            None,
+            None,
+            None,
+        )
+    };
+    status == ERROR_SUCCESS
+}
+
+pub fn open_download_page() {
+    let _ = unsafe { ShellExecuteW(None, w!("open"), w!("https://pawnio.eu"), None, None, SW_SHOWNORMAL) };
+}

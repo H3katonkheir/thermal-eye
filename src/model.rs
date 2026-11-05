@@ -162,17 +162,12 @@ struct Limits {
     critical: SeriesId,
 }
 
-/// State of the "Start with Windows" setting.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Autostart {
-    pub enabled: bool,
-    /// A change is waiting on the Windows permission prompt.
-    pub busy: bool,
-}
-
 pub struct Monitor {
     pub link: Link,
-    pub autostart: Autostart,
+    /// "Start with Windows" is on.
+    pub autostart: bool,
+    /// The PawnIO driver is not installed, so most temperatures are unavailable.
+    pub driver_missing: bool,
     pub components: Vec<Component>,
     pub history: History,
     topology: Topology,
@@ -185,7 +180,8 @@ impl Monitor {
     pub fn new(topology: Topology) -> Self {
         Self {
             link: Link::Starting,
-            autostart: Autostart::default(),
+            autostart: false,
+            driver_missing: false,
             components: Vec::new(),
             history: History::default(),
             topology,

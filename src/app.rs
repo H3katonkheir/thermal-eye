@@ -16,6 +16,7 @@ use crate::history::Stats;
 use crate::logo;
 use crate::model::{Component, Core, Extra, Link, Monitor, Row, Unit};
 use crate::theme::*;
+use crate::window;
 
 pub const WIDTH: f32 = 600.0;
 pub const COMPACT_WIDTH: f32 = 336.0;
@@ -303,18 +304,18 @@ impl ThermalEye {
         }
     }
 
-    fn banner(&self, ui: &mut Ui, width: f32, message: &str, action: Option<&str>) {
+    fn banner(&self, ui: &mut Ui, width: f32, message: &str, action: Option<(&str, Command)>) {
         let (rect, _) = ui.allocate_exact_size(vec2(width, BANNER_H), Sense::hover());
         let painter = ui.painter();
         painter.rect_filled(rect, 0.0, NESTED_BG);
         let left = pos2(rect.left() + PAD, rect.center().y);
         painter.text(left, Align2::LEFT_CENTER, message, body(12.0), AMBER);
-        if let Some(label) = action {
+        if let Some((label, command)) = action {
             let button = Rect::from_min_size(pos2(rect.right() - PAD - 96.0, rect.top() + 6.0), vec2(96.0, 22.0));
             let response = ui.interact(button, ui.scope_id().with("banner"), Sense::click());
             chip_painter(ui.painter(), button, label, false, response.hovered());
             if response.clicked() {
-                let _ = self.commands.send(Command::Connect);
+                let _ = self.commands.send(command);
             }
         }
     }
@@ -599,6 +600,7 @@ impl ThermalEye {
 
         label(ui, 3.0, "Sensor access");
         let status = match &monitor.link {
+            Link::Connected { elevated: true } if monitor.driver_missing => "Limited: PawnIO driver not installed",
             Link::Connected { elevated: true } => "Full access",
             Link::Connected { elevated: false } => "Limited: not running as administrator",
             Link::Starting => "Starting",
@@ -613,22 +615,14 @@ impl ThermalEye {
         let left = panel.left() + PAD + X_NAME;
         ui.painter().text(pos2(left, y), Align2::LEFT_CENTER, "Start with Windows", body(12.5), MUTED);
 
-        let setting = monitor.autostart;
-        if setting.busy {
-            let text = "Waiting for the Windows permission prompt…";
-            ui.painter().text(pos2(start, y), Align2::LEFT_CENTER, text, body(12.5), TEXT);
-            return;
-        }
         for (index, (text, enable)) in [("Off", false), ("On", true)].into_iter().enumerate() {
             let rect = Rect::from_min_size(pos2(start + index as f32 * 46.0, y - 11.0), vec2(40.0, 22.0));
             let response = ui.interact(rect, ui.scope_id().with(("autostart", text)), Sense::click());
-            chip_painter(ui.painter(), rect, text, setting.enabled == enable, response.hovered());
-            if response.clicked() && setting.enabled != enable {
+            chip_painter(ui.painter(), rect, text, monitor.autostart == enable, response.hovered());
+            if response.clicked() && monitor.autostart != enable {
                 let _ = self.commands.send(Command::SetAutostart(enable));
             }
         }
-        let hint = pos2(start + 98.0, y);
-        ui.painter().text(hint, Align2::LEFT_CENTER, "Also skips the prompt at launch", body(11.0), FAINT);
     }
 
     fn compact_table(&mut self, ui: &mut Ui, width: f32, monitor: &Monitor) {
@@ -688,14 +682,8 @@ impl ThermalEye {
         }
     }
 
-    /// Remembers the window position and writes settings at most every few seconds.
-    fn persist(&mut self, ctx: &Context) {
-        let (position, minimized) = ctx.input(|i| (i.viewport().outer_rect, i.viewport().minimized));
-        if let (Some(rect), false) = (position, minimized.unwrap_or(false)) {
-            if rect.min.x > -10_000.0 {
-                self.config.position = Some([rect.min.x, rect.min.y]);
-            }
-        }
+    /// Writes settings at most every few seconds.
+    fn persist(&mut self) {
         if self.config != self.saved && self.last_save.elapsed() > Duration::from_secs(3) {
             self.save();
         }
@@ -713,7 +701,10 @@ impl eframe::App for ThermalEye {
         BODY_BG.to_normalized_gamma_f32()
     }
 
-    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
+        if let Some(position) = window::position(frame) {
+            self.config.position = Some(position);
+        }
         self.draw(ui);
     }
 
@@ -735,17 +726,22 @@ impl ThermalEye {
         let compact = self.config.compact;
         let width = if compact { COMPACT_WIDTH } else { WIDTH };
 
-        let notice: Option<(String, Option<&str>)> = match &monitor.link {
+        let notice: Option<(String, Option<(&str, Command)>)> = match &monitor.link {
+            Link::Connected { elevated: true } if monitor.driver_missing => {
+                let text = if compact { "Some sensors need PawnIO" } else { "CPU, RAM and board temperatures need the PawnIO driver" };
+                Some((text.into(), Some(("Get PawnIO", Command::OpenDriverPage))))
+            }
             Link::Connected { elevated: true } if monitor.components.is_empty() => {
                 Some(("Reading sensors…".into(), None))
             }
             Link::Connected { elevated: true } => None,
             Link::Connected { elevated: false } => {
-                Some(("CPU, RAM and board temperatures need admin access".into(), Some("Grant access")))
+                let text = if compact { "Some sensors need admin access" } else { "CPU, RAM and board temperatures need admin access" };
+                Some((text.into(), Some(("Grant access", Command::Connect))))
             }
             Link::Starting => Some(("Starting sensors…".into(), None)),
             Link::AwaitingConsent => Some(("Waiting for the Windows permission prompt…".into(), None)),
-            Link::Lost(reason) => Some((reason.clone(), Some("Reconnect"))),
+            Link::Lost(reason) => Some((reason.clone(), Some(("Reconnect", Command::Connect)))),
         };
 
         let items = self.items(&monitor);
@@ -806,7 +802,7 @@ impl ThermalEye {
         drop(items);
 
         self.resize_to(&ctx, vec2(width, (fixed + visible_table_h).ceil()));
-        self.persist(&ctx);
+        self.persist();
         if reset {
             monitor.history.clear();
         }

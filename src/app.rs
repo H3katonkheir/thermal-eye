@@ -49,6 +49,8 @@ const X_NAME: f32 = 20.0;
 const X_RING: f32 = 204.0;
 const X_NOW: f32 = 256.0;
 const RING_RADIUS: f32 = 9.0;
+/// Where names and subtitles must end, leaving a clear gap before the ring.
+const NAME_END: f32 = X_RING - RING_RADIUS - 15.0;
 /// Distance between the right edges of neighbouring temperature columns.
 const TEMP_STEP: f32 = 54.0;
 const AVG_STEP: f32 = 52.0;
@@ -552,7 +554,7 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
             painter.text(pos2(left + 7.0, y), Align2::CENTER_CENTER, glyph.to_string(), icons(9.0), FAINT);
         }
         painter.text(pos2(left + X_NAME, y - 8.0), Align2::LEFT_CENTER, &component.title, strong(14.0), TEXT);
-        let subtitle = elide(&component.subtitle, 30);
+        let subtitle = fit_text(ui, &component.subtitle, &body(11.0), NAME_END - X_NAME);
         let subtitle_rect = painter.text(pos2(left + X_NAME, y + 9.0), Align2::LEFT_CENTER, &subtitle, body(11.0), FAINT);
 
         let high = monitor.stats(component.high, seconds);
@@ -596,7 +598,9 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
 
         let font = if die { strong(12.5) } else { body(12.5) };
         let color = if die { TEXT } else { MUTED };
-        let shown = elide(&row.label, 28);
+        // A note follows the name, so the name gives up room for it.
+        let note_width = note.map_or(0.0, |note| text_width(ui, note, &body(11.0)) + 8.0);
+        let shown = fit_text(ui, &row.label, &font, NAME_END - X_NAME - note_width);
         let label = painter.text(pos2(left + X_NAME, y), Align2::LEFT_CENTER, &shown, font, color);
         if let Some(note) = note {
             let x = label.right() + 8.0;
@@ -970,6 +974,30 @@ fn show_full_text(ui: &Ui, response: &egui::Response, shown_rect: Rect, shown: &
     if shown != full && ui.rect_contains_pointer(shown_rect) {
         response.clone().on_hover_text(full);
     }
+}
+
+fn text_width(ui: &Ui, text: &str, font: &egui::FontId) -> f32 {
+    ui.painter().layout_no_wrap(text.to_owned(), font.clone(), Color32::WHITE).size().x
+}
+
+/// Shortens text with an ellipsis until it fits `max_width` as drawn in `font`.
+fn fit_text(ui: &Ui, text: &str, font: &egui::FontId, max_width: f32) -> String {
+    if text_width(ui, text, font) <= max_width {
+        return text.to_owned();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let cut = |kept: usize| format!("{}…", chars[..kept].iter().collect::<String>().trim_end());
+    // The most characters that still fit with the ellipsis.
+    let (mut fits, mut too_many) = (0, chars.len());
+    while too_many - fits > 1 {
+        let middle = (fits + too_many) / 2;
+        if text_width(ui, &cut(middle), font) <= max_width {
+            fits = middle;
+        } else {
+            too_many = middle;
+        }
+    }
+    cut(fits)
 }
 
 fn elide(text: &str, limit: usize) -> String {

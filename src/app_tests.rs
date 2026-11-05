@@ -1004,3 +1004,57 @@ fn sensor_access_heads_the_settings() {
     }
 }
 
+/// Text drawn in the name column of component and sensor rows, which the extra
+/// readings under a component do not use.
+fn name_texts(widget: &Harness) -> Vec<(String, Rect)> {
+    let monitor = widget.monitor.clone();
+    let monitor = monitor.lock().unwrap();
+    let mut rows = Vec::new();
+    let mut top = TITLE_H + HEADER_H;
+    for item in widget.app.items(&monitor) {
+        if matches!(item, Item::Component(_) | Item::Sensor { .. }) {
+            rows.push(Rect::from_min_max(pos2(0.0, top), pos2(PAD + X_RING, top + item.height())));
+        }
+        top += item.height();
+    }
+    let in_names = |rect: &Rect| rows.iter().any(|row| row.contains(rect.center()));
+    widget.drawn.iter().filter(|(_, rect)| in_names(rect)).cloned().collect()
+}
+
+#[test]
+fn names_stop_well_short_of_the_ring() {
+    let all: Vec<String> = ["cpu", "gpu0", "ram", "storage", "system"].map(String::from).to_vec();
+    let mut widget = Harness::new(Config { expanded: all, ..Config::default() });
+    {
+        let mut monitor = widget.monitor.lock().unwrap();
+        monitor.components[1].subtitle = "A graphics card with an extremely long product name".into();
+        monitor.components[3].rows[1].label = "A drive with a really very long model name".into();
+    }
+    widget.frame(Vec::new());
+
+    let limit = PAD + NAME_END;
+    let ring_left = PAD + X_RING - RING_RADIUS - 2.25;
+    assert!(ring_left - limit >= 12.0, "the gap before the ring is only {}", ring_left - limit);
+    let names = name_texts(&widget);
+    assert!(names.iter().any(|(text, _)| text.starts_with("2 × A-DATA")), "RAM subtitle missing");
+    assert!(names.iter().any(|(text, _)| text.starts_with("A graphics card") && text.ends_with('…')));
+    for (text, rect) in &names {
+        assert!(rect.right() <= limit + 0.5, "{text:?} ends at {}, past {limit}", rect.right());
+    }
+}
+
+#[test]
+fn fit_text_only_shortens_what_does_not_fit() {
+    let widget = Harness::new(Config::default());
+    let ctx = widget.ctx.clone();
+    let _ = ctx.run_ui(Default::default(), |ui| {
+        let font = body(11.0);
+        assert_eq!(fit_text(ui, "RX 9070 XT", &font, 160.0), "RX 9070 XT");
+        let long = "2 × A-DATA AX5U6000C3032G-BLABK";
+        let shown = fit_text(ui, long, &font, 120.0);
+        assert!(shown.ends_with('…') && shown.len() < long.len());
+        assert!(text_width(ui, &shown, &font) <= 120.0);
+        let one_more = format!("{}…", long.chars().take(shown.chars().count()).collect::<String>().trim_end());
+        assert!(text_width(ui, &one_more, &font) > 120.0, "{shown:?} could have kept another character");
+    });
+}

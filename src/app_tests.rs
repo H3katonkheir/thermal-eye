@@ -139,6 +139,12 @@ impl Harness {
     }
 
     /// The window as last sized, or room to spare before the first frame.
+    /// Bottom edge of the graph's plot, above the tip when it shows.
+    fn graph_bottom(&self) -> f32 {
+        let tip = if self.app.config.graph_tip_dismissed { 0.0 } else { GRAPH_TIP_H };
+        self.height() - BOTTOM_PAD - tip
+    }
+
     fn screen_width(&self) -> f32 {
         if self.width() > 0.0 { self.width() } else { 800.0 }
     }
@@ -188,7 +194,7 @@ fn the_graph_button_opens_the_graph_and_dots_choose_its_lines() {
 
     widget.click(full_button(4));
     assert!(widget.app.config.graph_open);
-    assert_eq!(widget.height(), closed + GRAPH_CONTROLS_H + GRAPH_PLOT_H);
+    assert_eq!(widget.height(), closed + GRAPH_CONTROLS_H + GRAPH_PLOT_H + GRAPH_TIP_H);
 
     widget.click((dot_x(), row_y(2)));
     assert_eq!(widget.app.config.graphed, ["ram"]);
@@ -210,7 +216,7 @@ fn a_dot_does_not_also_open_the_row() {
 #[test]
 fn metric_chips_filter_the_graph() {
     let mut widget = Harness::new(Config { graph_open: true, ..Config::default() });
-    let y = widget.height() - BOTTOM_PAD - GRAPH_PLOT_H - GRAPH_CONTROLS_H + 18.0;
+    let y = widget.graph_bottom() - GRAPH_PLOT_H - GRAPH_CONTROLS_H + 18.0;
     widget.click((PAD + 20.0, y));
     assert!(!widget.app.config.metrics.high);
     widget.click((PAD + 52.0 + 30.0, y));
@@ -266,7 +272,7 @@ fn dragging_the_title_bar_moves_the_window() {
 fn hovering_the_graph_is_safe_with_and_without_lines() {
     for graphed in [vec!["cpu".to_owned()], Vec::new()] {
         let mut widget = Harness::new(Config { graph_open: true, graphed, ..Config::default() });
-        let y = widget.height() - BOTTOM_PAD - GRAPH_PLOT_H / 2.0;
+        let y = widget.graph_bottom() - GRAPH_PLOT_H / 2.0;
         for x in [50.0, 300.0, WIDTH - 45.0] {
             widget.frame(vec![Event::PointerMoved(pos2(x, y))]);
         }
@@ -284,7 +290,7 @@ fn hovering_a_graph_with_many_lines_does_not_crash() {
     let lines = widget.app.graph_lines(&monitor.lock().unwrap(), 60, 100).len();
     assert!(lines > graph::TOOLTIP_LINES, "only {lines} lines");
 
-    let bottom = widget.height() - BOTTOM_PAD;
+    let bottom = widget.graph_bottom();
     // The test data is a few seconds old, so only the right end of the plot has values.
     for y in [bottom - GRAPH_PLOT_H + 8.0, bottom - GRAPH_PLOT_H / 2.0, bottom - 30.0] {
         for x in (40..widget.width() as usize - 20).step_by(4) {
@@ -896,4 +902,67 @@ fn the_ring_tooltip_sits_by_the_ring() {
     let tooltip = widget.drawn.iter().find(|(text, _)| text.starts_with("Warning from")).expect("no tooltip").1;
     assert!((tooltip.left() - x).abs() < 40.0, "tooltip starts at x {}, ring is at {x}", tooltip.left());
     assert!(tooltip.top() > y && tooltip.top() - y < 40.0, "tooltip starts at y {}, ring is at {y}", tooltip.top());
+}
+
+#[test]
+fn settings_take_over_the_window_until_done() {
+    let mut widget = Harness::new(Config { graph_open: true, ..Config::default() });
+    widget.click(full_button(6));
+    assert!(widget.shows("SETTINGS") && widget.shows("Temperature unit"));
+    assert!(!widget.shows("NOW") && !widget.shows("Ryzen 9 9950X3D"), "the table is covered");
+    assert!(!widget.shows("Average"), "and so is the graph");
+    let banner = if widget.shows("Starting sensors…") { BANNER_H } else { 0.0 };
+    let expected = TITLE_H + banner + HEADER_H + widget.app.settings_height() + BOTTOM_PAD;
+    assert_eq!(widget.height(), expected, "the window fits the settings alone");
+
+    let done = (widget.width() - PAD - 32.0, TITLE_H + banner + HEADER_H / 2.0);
+    widget.click(done);
+    assert!(!widget.app.settings_open);
+    assert!(widget.shows("NOW") && widget.shows("Ryzen 9 9950X3D") && widget.shows("Average"));
+}
+
+#[test]
+fn the_settings_button_also_closes_them() {
+    let mut widget = Harness::new(Config::default());
+    widget.click(full_button(6));
+    widget.click(full_button(6));
+    assert!(!widget.app.settings_open);
+    assert!(widget.shows("NOW"));
+}
+
+#[test]
+fn switching_to_compact_leaves_settings() {
+    let mut widget = Harness::new(Config::default());
+    widget.click(full_button(6));
+    widget.click(full_button(2));
+    assert!(widget.app.config.compact && !widget.app.settings_open);
+    widget.click(button(2, 26.0, widget.width(), COMPACT_TITLE_H));
+    assert!(widget.shows("NOW"), "back to the table, not the settings");
+}
+
+const GRAPH_TIP: &str = "Click the dot at the end of a row to add it to the graph, and again to take it off.";
+
+#[test]
+fn the_graph_explains_its_dots_until_dismissed() {
+    let mut widget = Harness::new(Config::default());
+    assert!(!widget.shows(GRAPH_TIP), "only with the graph open");
+    widget.click(full_button(4));
+    assert!(widget.shows(GRAPH_TIP));
+    let with_tip = widget.height();
+
+    widget.click((widget.width() - PAD - 10.0, widget.height() - BOTTOM_PAD - GRAPH_TIP_H / 2.0));
+    assert!(widget.app.config.graph_tip_dismissed);
+    assert!(!widget.shows(GRAPH_TIP));
+    assert_eq!(widget.height(), with_tip - GRAPH_TIP_H, "the window shrinks back");
+}
+
+#[test]
+fn a_dismissed_graph_tip_stays_gone() {
+    let config = Config { graph_open: true, graph_tip_dismissed: true, ..Config::default() };
+    let mut widget = Harness::new(config.clone());
+    widget.frame(Vec::new());
+    assert!(!widget.shows(GRAPH_TIP));
+
+    let saved: Config = serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
+    assert!(saved.graph_tip_dismissed, "kept with the other settings");
 }

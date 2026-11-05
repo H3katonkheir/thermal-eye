@@ -39,6 +39,8 @@ pub struct Config {
     pub always_on_top: bool,
     pub compact: bool,
     pub graph_open: bool,
+    /// The note under the graph on how to choose its lines has been closed.
+    pub graph_tip_dismissed: bool,
     /// Span of the high, average and usage figures, and of the graph.
     pub window_seconds: u32,
     /// Components showing their sensors.
@@ -62,6 +64,7 @@ impl Default for Config {
             always_on_top: false,
             compact: false,
             graph_open: false,
+            graph_tip_dismissed: false,
             window_seconds: 300,
             expanded: Vec::new(),
             graphed: vec!["cpu".into(), "gpu0".into()],

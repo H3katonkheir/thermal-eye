@@ -35,6 +35,7 @@ const EXTRA_PAD: f32 = 12.0;
 const EXTRA_COLUMNS: usize = 4;
 const GRAPH_CONTROLS_H: f32 = 34.0;
 const GRAPH_PLOT_H: f32 = 190.0;
+const GRAPH_TIP_H: f32 = 30.0;
 const SETTINGS_ROW_H: f32 = 34.0;
 const COMPACT_HEAD_H: f32 = 20.0;
 const COMPACT_ROW_H: f32 = 29.0;
@@ -716,6 +717,23 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
         graph::draw(ui, rect, &lines, seconds, |c| Self::format_temp(fahrenheit, c));
     }
 
+    /// How to choose what the graph shows, until the user dismisses it.
+    fn graph_tip(&mut self, ui: &mut Ui, width: f32) {
+        let (rect, _) = ui.allocate_exact_size(vec2(width, GRAPH_TIP_H), Sense::hover());
+        let y = rect.center().y;
+        let painter = ui.painter();
+        let text = "Click the dot at the end of a row to add it to the graph, and again to take it off.";
+        painter.text(pos2(rect.center().x, y), Align2::CENTER_CENTER, text, body(11.5), MUTED);
+
+        let close = Rect::from_center_size(pos2(rect.right() - PAD - 10.0, y), Vec2::splat(20.0));
+        let dismiss = ui.interact(close, ui.scope_id().with("dismiss-graph-tip"), Sense::click()).on_hover_text("Dismiss");
+        let color = if dismiss.hovered() { TEXT } else { FAINT };
+        ui.painter().text(close.center(), Align2::CENTER_CENTER, icon::CLOSE.to_string(), icons(10.0), color);
+        if dismiss.clicked() {
+            self.config.graph_tip_dismissed = true;
+        }
+    }
+
     fn compact_table(&mut self, ui: &mut Ui, width: f32, monitor: &Monitor) {
         let seconds = self.config.window_seconds;
         let columns = self.columns();
@@ -840,6 +858,9 @@ impl ThermalEye {
             fixed += HEADER_H;
             if self.config.graph_open {
                 fixed += GRAPH_CONTROLS_H + GRAPH_PLOT_H;
+                if !self.config.graph_tip_dismissed {
+                    fixed += GRAPH_TIP_H;
+                }
             }
             if self.settings_open {
                 fixed += self.settings_height();
@@ -883,6 +904,9 @@ impl ThermalEye {
             }
             if self.config.graph_open {
                 self.graph_panel(ui, width, &monitor);
+                if !self.config.graph_tip_dismissed {
+                    self.graph_tip(ui, width);
+                }
             }
         }
         drop(items);

@@ -14,6 +14,7 @@ mod manifest;
 mod model;
 mod theme;
 mod topology;
+mod tray;
 mod update;
 mod window;
 
@@ -26,6 +27,7 @@ use app::{INITIAL_HEIGHT, ThermalEye};
 use config::Config;
 use model::Monitor;
 use topology::Topology;
+use tray::Tray;
 
 fn main() -> eframe::Result {
     if let Some(enable) = autostart_request() {
@@ -79,7 +81,8 @@ fn main() -> eframe::Result {
                 Some(path) => bridge::replay(path, monitor.clone(), ctx.clone()),
                 None => bridge::start(monitor.clone(), ctx.clone(), !flag("--no-elevate"), check_updates),
             };
-            Ok(Box::new(ThermalEye::new(&ctx, monitor, commands, config)))
+            let tray = Tray::start(monitor.clone(), &config, window::handle(creation));
+            Ok(Box::new(ThermalEye::new(&ctx, monitor, commands, config).with_tray(tray)))
         }),
     )
 }

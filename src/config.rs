@@ -50,6 +50,10 @@ pub struct Config {
     pub metrics: Metrics,
     pub columns: Columns,
     pub hidden: Vec<String>,
+    /// Show the hottest reading in the notification area.
+    pub tray_icon: bool,
+    /// The close button hides the widget, which keeps running behind the tray icon.
+    pub close_to_tray: bool,
     /// Look for new versions at launch and once a day.
     pub check_updates: bool,
     /// The version last run, so the first run after an update can say so.
@@ -71,6 +75,8 @@ impl Default for Config {
             metrics: Metrics::default(),
             columns: Columns::default(),
             hidden: Vec::new(),
+            tray_icon: true,
+            close_to_tray: false,
             check_updates: true,
             seen_version: None,
             position: None,

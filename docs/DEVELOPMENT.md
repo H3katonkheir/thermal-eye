@@ -25,6 +25,7 @@ which keeps the installer as a downloadable artifact.
 | `src/app.rs` | The widget: chrome, banners, table, compact view |
 | `src/app_settings.rs` | The settings panel |
 | `src/graph.rs` | History plot |
+| `src/tray.rs` | The temperature in the notification area |
 | `src/model.rs` | Turns the raw sensor list into components |
 | `src/history.rs` | Time series and statistics |
 | `src/bridge.rs` | Starts the helper, reads its pipe |

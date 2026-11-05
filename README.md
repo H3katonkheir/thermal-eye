@@ -26,6 +26,11 @@
 - **Every core:** open the CPU row to see each core's clock, low, peak, power and usage,
   grouped by die.
 - **Compact view:** a small window that stays out of the way, and can stay on top.
+- **In the tray:** the hottest reading sits by the clock, coloured the same way, with
+  every component in its tooltip. Click it to bring the window back. Windows hides new
+  tray icons at first, so look under **^**, and drag it out to keep it in view. Turn it
+  off with **Temperature in tray** in Settings. With **Close to tray** on, the close
+  button hides the window instead, and **Exit** in the icon's menu quits.
 - **Warnings at a glance:** readings turn amber or red as they near each part's limits.
   Hover over a component's ring to see where those limits are.
 - **Updates itself:** one click to install a new version.

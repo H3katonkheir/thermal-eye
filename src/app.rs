@@ -17,6 +17,7 @@ use crate::logo;
 use crate::manifest;
 use crate::model::{Component, Core, Extra, Link, Monitor, Row, Unit, UpdateState};
 use crate::theme::*;
+use crate::tray::Tray;
 use crate::update;
 use crate::window;
 
@@ -164,6 +165,8 @@ pub struct ThermalEye {
     /// Just updated, and the user has not dismissed the notice yet.
     just_updated: bool,
     copied_at: Option<Instant>,
+    /// The notification area icon. Absent in tests.
+    tray: Option<Tray>,
 }
 
 impl ThermalEye {
@@ -191,7 +194,13 @@ impl ThermalEye {
             requested_size: Vec2::ZERO,
             just_updated,
             copied_at: None,
+            tray: None,
         }
+    }
+
+    pub fn with_tray(mut self, tray: Option<Tray>) -> Self {
+        self.tray = tray;
+        self
     }
 
     fn limits_help(&self, warn: f32, critical: f32) -> String {
@@ -203,7 +212,7 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
         Columns::new(&self.config)
     }
 
-    fn format_temp(fahrenheit: bool, celsius: f32) -> String {
+    pub(crate) fn format_temp(fahrenheit: bool, celsius: f32) -> String {
         let value = if fahrenheit { celsius * 9.0 / 5.0 + 32.0 } else { celsius };
         format!("{value:.0}°")
     }
@@ -351,8 +360,9 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
         };
 
         let (close, minimize) = (next(), next());
-        if self.icon_button(ui, close, icon::CLOSE, false, "Close") {
-            ui.ctx().send_viewport_cmd(ViewportCommand::Close);
+        let tip = if self.closes_to_tray() { "Hide to tray" } else { "Close" };
+        if self.icon_button(ui, close, icon::CLOSE, false, tip) {
+            self.close(ui.ctx());
         }
         if self.icon_button(ui, minimize, icon::MINIMIZE, false, "Minimise") {
             ui.ctx().send_viewport_cmd(ViewportCommand::Minimized(true));
@@ -388,6 +398,21 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
         if self.icon_button(ui, settings, icon::SETTINGS, self.settings_open, "Settings") {
             self.settings_open = !self.settings_open;
         }
+    }
+
+    fn closes_to_tray(&self) -> bool {
+        self.config.close_to_tray && self.config.tray_icon && self.tray.is_some()
+    }
+
+    /// Hides to the tray when set to, and closes otherwise, including while the tray
+    /// icon is missing, which would leave no way back to a hidden window.
+    fn close(&mut self, ctx: &Context) {
+        if self.closes_to_tray() && self.tray.as_ref().is_some_and(Tray::hide_window) {
+            // Hidden windows may not be drawn, so this cannot wait for `persist`.
+            self.save();
+            return;
+        }
+        ctx.send_viewport_cmd(ViewportCommand::Close);
     }
 
     fn banner(&self, ui: &mut Ui, width: f32, message: &str, action: Option<(&str, Command)>) {
@@ -836,6 +861,8 @@ impl eframe::App for ThermalEye {
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.save();
+        // Removes the icon now: one left behind lingers until the mouse passes over it.
+        self.tray = None;
     }
 }
 
@@ -921,6 +948,9 @@ impl ThermalEye {
 
         self.resize_to(&ctx, vec2(width, (fixed + visible_table_h).ceil()));
         self.persist();
+        if let Some(tray) = &self.tray {
+            tray.sync(&self.config);
+        }
         if reset {
             monitor.history.clear();
         }

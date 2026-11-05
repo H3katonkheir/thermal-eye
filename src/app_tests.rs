@@ -334,6 +334,35 @@ fn settings_switch_units_and_hide_components() {
 }
 
 #[test]
+fn the_tray_icon_can_be_turned_off() {
+    let mut widget = Harness::new(Config::default());
+    assert!(widget.app.config.tray_icon, "on by default");
+    widget.click(full_button(6));
+    let top = widget.height() - BOTTOM_PAD - widget.app.settings_height();
+    let (y, left) = (top + row_middle(settings::TRAY_ROW), PAD + X_NAME + 150.0);
+
+    widget.click((left + 20.0, y));
+    assert!(!widget.app.config.tray_icon);
+    widget.click((left + 46.0 + 20.0, y));
+    assert!(widget.app.config.tray_icon);
+}
+
+#[test]
+fn close_to_tray_is_set_in_settings_and_never_strands_the_window() {
+    let mut widget = Harness::new(Config::default());
+    assert!(!widget.app.config.close_to_tray, "off by default");
+    widget.click(full_button(6));
+    let top = widget.height() - BOTTOM_PAD - widget.app.settings_height();
+    widget.click((PAD + X_NAME + 150.0 + 46.0 + 20.0, top + row_middle(settings::CLOSE_ROW)));
+    assert!(widget.app.config.close_to_tray);
+    assert!(widget.shows("Exit from the tray icon's menu"));
+
+    // Without a tray icon to bring it back, the close button still closes.
+    widget.click(full_button(0));
+    assert!(widget.commands.iter().any(|c| matches!(c, ViewportCommand::Close)));
+}
+
+#[test]
 fn start_with_windows_asks_only_when_the_setting_changes() {
     let mut widget = Harness::new(Config::default());
     widget.click(full_button(6));

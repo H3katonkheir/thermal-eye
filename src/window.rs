@@ -44,6 +44,11 @@ fn hwnd(window: &impl HasWindowHandle) -> Option<HWND> {
     }
 }
 
+/// The raw window handle, for another thread to restore or close the window.
+pub fn handle(window: &impl HasWindowHandle) -> Option<isize> {
+    hwnd(window).map(|hwnd| hwnd.0 as isize)
+}
+
 // Window positions are kept in physical pixels. Logical points depend on the
 // scaling of the monitor the window is on, so with mixed scaling a position saved
 // on one monitor lands somewhere else when restored on another.

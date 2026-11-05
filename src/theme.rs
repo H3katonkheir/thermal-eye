@@ -172,18 +172,25 @@ const RING_BAR: f32 = 2.5;
 const RING_EDGE: f32 = 1.0;
 
 pub fn ring(painter: &Painter, center: Pos2, radius: f32, fraction: f32, color: Color32) {
-    // The track shows an even edge on both sides of the bar.
-    painter.circle_stroke(center, radius, Stroke::new(RING_BAR + 2.0 * RING_EDGE, TRACK));
-    let fraction = fraction.clamp(0.0, 1.0);
-    if fraction > 0.01 {
-        let steps = (fraction * 48.0).ceil() as usize + 1;
-        let points = (0..=steps)
+    // Both are drawn as paths on the same radius: a circle's own outline sits
+    // outside its radius, which would leave the bar poking out of the track.
+    let arc = |fraction: f32, steps: usize| -> Vec<Pos2> {
+        (0..=steps)
             .map(|i| {
                 let angle = -FRAC_PI_2 + TAU * fraction * i as f32 / steps as f32;
                 center + radius * vec2(angle.cos(), angle.sin())
             })
-            .collect();
-        painter.add(Shape::line(points, Stroke::new(RING_BAR, color)));
+            .collect()
+    };
+    // The track shows an even edge on both sides of the bar.
+    let mut track = arc(1.0, 64);
+    track.pop();
+    painter.add(Shape::closed_line(track, Stroke::new(RING_BAR + 2.0 * RING_EDGE, TRACK)));
+
+    let fraction = fraction.clamp(0.0, 1.0);
+    if fraction > 0.01 {
+        let steps = (fraction * 48.0).ceil() as usize + 1;
+        painter.add(Shape::line(arc(fraction, steps), Stroke::new(RING_BAR, color)));
     }
 }
 

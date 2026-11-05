@@ -1,0 +1,12 @@
+# Recorded sensor data, not code
+tests/fixtures/
+
+# Workflow YAML only yields bare keys; docs/DEVELOPMENT.md covers CI
+.github/
+
+# Generated from assets/logo-source.webp by tools/make_icons.py
+assets/icon.png
+assets/logo.png
+
+# Raw key; docs/DEVELOPMENT.md describes the signing setup
+assets/update-public-key.txt

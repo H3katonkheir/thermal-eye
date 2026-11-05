@@ -113,6 +113,18 @@ impl Series {
         Stats { now: self.latest(), low: total.low, high: total.high, avg: total.avg() }
     }
 
+    /// Which group of samples, counted since the series began, the first of
+    /// `points` stands for. It goes up by one each time the graph slides along a point.
+    pub fn first_point(&self, seconds: u32, max_points: usize) -> i64 {
+        let (total, window) = if seconds as usize <= FINE_SAMPLES {
+            (self.fine_total, seconds as usize)
+        } else {
+            (self.coarse_total, (seconds / COARSE_SECONDS) as usize)
+        };
+        let grouping = Grouping::new(total, window, max_points);
+        grouping.newest as i64 - (grouping.count as i64 - 1)
+    }
+
     /// Evenly spaced values across the window, oldest first, `NaN` where there is
     /// no data. `peak` keeps the highest sample of each span instead of the mean.
     pub fn points(&self, seconds: u32, max_points: usize, peak: bool) -> Vec<f32> {
@@ -133,10 +145,8 @@ impl Series {
 /// of that count rather than being measured back from the newest sample, so a
 /// finished group never changes and the graph slides instead of changing shape.
 fn resample(samples: &[f32], total: u64, window: usize, max_points: usize, peak: bool) -> Vec<f32> {
-    let group = window.div_ceil(max_points.max(1)).max(1) as u64;
-    let count = (window as u64 / group).max(2);
+    let Grouping { size: group, count, newest: newest_group } = Grouping::new(total, window, max_points);
     let first_held = total - samples.len() as u64;
-    let newest_group = total.saturating_sub(1) / group;
 
     (0..count)
         .map(|index| {
@@ -152,6 +162,24 @@ fn resample(samples: &[f32], total: u64, window: usize, max_points: usize, peak:
             if peak { span.high.unwrap_or(f32::NAN) } else { span.avg().unwrap_or(f32::NAN) }
         })
         .collect()
+}
+
+/// How a window of samples is split into points.
+struct Grouping {
+    /// Samples per point.
+    size: u64,
+    /// Points across the window.
+    count: u64,
+    /// Number of the group holding the newest sample.
+    newest: u64,
+}
+
+impl Grouping {
+    fn new(total: u64, window: usize, max_points: usize) -> Self {
+        let size = window.div_ceil(max_points.max(1)).max(1) as u64;
+        let count = (window as u64 / size).max(2);
+        Self { size, count, newest: total.saturating_sub(1) / size }
+    }
 }
 
 #[derive(Default)]
@@ -285,6 +313,17 @@ mod tests {
         assert_eq!(before.len(), after.len());
         let settled = before.len() - 2;
         assert_eq!(&after[..settled], &before[1..=settled], "history must not change shape");
+    }
+
+    #[test]
+    fn the_first_point_moves_on_by_one_as_the_graph_slides() {
+        // 999 samples leave the newest group of two half full.
+        let mut series = filled(&[1.0; 999]);
+        let before = series.first_point(900, 588);
+        series.push(1.0);
+        assert_eq!(series.first_point(900, 588), before, "half a group is not a new point");
+        series.push(1.0);
+        assert_eq!(series.first_point(900, 588), before + 1);
     }
 
     #[test]

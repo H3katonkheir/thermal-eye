@@ -255,7 +255,11 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
 
     fn graph_lines(&self, monitor: &Monitor, seconds: u32, columns: usize) -> Vec<Line> {
         let metrics = &self.config.metrics;
-        let series = |id: usize, peak: bool| monitor.history.series(id).points(seconds, columns, peak);
+        let line = |label: String, color: Color32, id: usize, peak: bool, is_usage: bool, weight: f32| {
+            let series = monitor.history.series(id);
+            let points = series.points(seconds, columns, peak);
+            Line { label, color, points, first: series.first_point(seconds, columns), is_usage, weight }
+        };
         let mut lines = Vec::new();
         let row_lines = |lines: &mut Vec<Line>, title: &str, row: &Row| {
             if !self.is_graphed(&row.key) {
@@ -263,12 +267,10 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
             }
             let color = self.series_color(&row.key);
             if let Some(id) = row.temp {
-                let label = format!("{title} {}", row.label);
-                lines.push(Line { label, color, points: series(id, false), is_usage: false, weight: 1.6 });
+                lines.push(line(format!("{title} {}", row.label), color, id, false, false, 1.6));
             }
             if let (Some(id), true) = (row.usage, metrics.usage) {
-                let label = format!("{} usage", row.label);
-                lines.push(Line { label, color, points: series(id, false), is_usage: true, weight: 1.3 });
+                lines.push(line(format!("{} usage", row.label), color, id, false, true, 1.3));
             }
         };
 
@@ -277,17 +279,14 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
             if self.is_graphed(&component.key) {
                 let color = component_color(component.kind);
                 if metrics.high {
-                    let points = series(component.high, true);
-                    lines.push(Line { label: format!("{title} high"), color, points, is_usage: false, weight: 2.0 });
+                    lines.push(line(format!("{title} high"), color, component.high, true, false, 2.0));
                 }
                 if metrics.avg {
-                    let points = series(component.avg, false);
                     let color = color.gamma_multiply(0.7);
-                    lines.push(Line { label: format!("{title} avg"), color, points, is_usage: false, weight: 1.4 });
+                    lines.push(line(format!("{title} avg"), color, component.avg, false, false, 1.4));
                 }
                 if let (Some(id), true) = (component.usage, metrics.usage) {
-                    let points = series(id, false);
-                    lines.push(Line { label: format!("{title} usage"), color, points, is_usage: true, weight: 1.4 });
+                    lines.push(line(format!("{title} usage"), color, id, false, true, 1.4));
                 }
             }
             for row in &component.rows {
@@ -296,13 +295,8 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
             for die in &component.dies {
                 row_lines(&mut lines, title, &die.row);
                 for core in die.cores.iter().filter(|c| self.is_graphed(&c.key)) {
-                    lines.push(Line {
-                        label: format!("{} usage", core.label),
-                        color: self.series_color(&core.key),
-                        points: series(core.usage, false),
-                        is_usage: true,
-                        weight: 1.3,
-                    });
+                    let color = self.series_color(&core.key);
+                    lines.push(line(format!("{} usage", core.label), color, core.usage, false, true, 1.3));
                 }
             }
         }
@@ -712,7 +706,7 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
             x += chip_width + 6.0;
         }
         let note = pos2(controls.right() - PAD, controls.top() + 18.5);
-        ui.painter().text(note, Align2::RIGHT_CENTER, "Bright: temperature    Faint: usage", body(11.0), FAINT);
+        ui.painter().text(note, Align2::RIGHT_CENTER, "Solid: temperature    Dashed: usage", body(11.0), FAINT);
 
         let (rect, _) = ui.allocate_exact_size(vec2(width, GRAPH_PLOT_H), Sense::hover());
         let rect = rect.shrink2(vec2(PAD - 8.0, 0.0));

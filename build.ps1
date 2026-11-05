@@ -15,6 +15,12 @@ Remove-Item dist\*MonoPosixHelper.dll -ErrorAction SilentlyContinue
 
 Copy-Item target\release\thermal-eye.exe, LICENSE, THIRD-PARTY-NOTICES.md dist\ -Force
 
+# A release whose files disagree on the version would confuse the updater.
+foreach ($exe in 'thermal-eye.exe', 'thermal-eye-sensors.exe') {
+    $built = (Get-Item "dist\$exe").VersionInfo.FileVersion
+    if (-not $built.StartsWith($version)) { throw "$exe reports version $built, expected $version" }
+}
+
 $iscc = @(
     "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
     "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
@@ -28,5 +34,13 @@ foreach ($attempt in 1..3) {
     Start-Sleep -Seconds 5
 }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+# Signs the release for the updater. Only the maintainer's machine has the key.
+if (Test-Path "$env:USERPROFILE\.thermal-eye\update-signing.key") {
+    cargo run --quiet --example release_signing -- sign "dist\ThermalEyeSetup-$version.exe" $version dist\update.json
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+} else {
+    Write-Warning 'No signing key, so this build cannot be released as an update.'
+}
 
 Get-ChildItem dist | Select-Object Name, @{ n = 'MB'; e = { [math]::Round($_.Length / 1MB, 1) } }

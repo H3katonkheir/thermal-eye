@@ -33,6 +33,10 @@ pub struct Config {
     pub graphed: Vec<String>,
     pub metrics: Metrics,
     pub hidden: Vec<String>,
+    /// Look for new versions at launch and once a day.
+    pub check_updates: bool,
+    /// The version last run, so the first run after an update can say so.
+    pub seen_version: Option<String>,
     pub position: Option<[f32; 2]>,
 }
 
@@ -48,6 +52,8 @@ impl Default for Config {
             graphed: vec!["cpu".into(), "gpu0".into()],
             metrics: Metrics::default(),
             hidden: Vec::new(),
+            check_updates: true,
+            seen_version: None,
             position: None,
         }
     }

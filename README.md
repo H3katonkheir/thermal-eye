@@ -37,6 +37,21 @@ task is what lets it start without a prompt, and that is why the app always goes
 Program Files: an elevated task must not point at a file ordinary programs could
 replace. **Start with Windows** can be changed at any time under Settings.
 
+## Updates
+
+Thermal Eye looks for a new version at launch and once a day, and you can check
+any time under Settings. Updates download in the background, then a banner offers
+**Install**. That takes one Windows permission prompt, and the widget reopens by
+itself. Afterwards, **What's new** opens the release notes. Your settings, Start
+with Windows and PawnIO choices are left as they were.
+
+Each check downloads one small file from GitHub, which is the only time the app goes
+online by itself. Turn **Check for updates** off under Settings to stop it.
+
+Updates are signed: the app refuses anything without a valid signature from the
+release key, refuses to install an older version, and checks the installer's hash
+again immediately before running it.
+
 ## What the columns mean
 
 | Column | Meaning |
@@ -79,6 +94,8 @@ its own sensors report; the others use fixed values in `src/model.rs`.
 | `src/bridge.rs` | Starts the helper, reads its pipe |
 | `src/autostart.rs` | The scheduled task and Start with Windows |
 | `src/driver.rs` | Checks for the PawnIO driver |
+| `src/update.rs` | Finds, downloads and starts updates |
+| `src/manifest.rs` | The signed description of a release |
 | `src/topology.rs` | Core and L3 layout from Windows |
 | `sensors/` | C# helper around LibreHardwareMonitorLib |
 | `installer/` | Inno Setup script |
@@ -117,6 +134,37 @@ elevated prompt and replay it:
 
 The icons in `assets/` are generated from `assets/logo-source.webp` by
 `tools/make_icons.py`.
+
+## Releasing
+
+1. Set the new `version` in `Cargo.toml`.
+2. Run `.\build.ps1`. With the signing key present, this also writes `dist\update.json`.
+3. Create a GitHub release tagged `v<version>`, with the changes in its notes. The
+   tag must match, because **What's new** links straight to it.
+4. Attach `dist\ThermalEyeSetup-<version>.exe` and `dist\update.json` to that release.
+
+Installed copies read `update.json` from the latest release, so attach both files
+before publishing, and do not mark it as a pre-release. The repository must be
+public, or friends' copies cannot reach it.
+
+### The signing key
+
+Updates are signed with a private key at
+`%USERPROFILE%\.thermal-eye\update-signing.key`, and the matching public key is
+built into the app from `assets/update-public-key.txt`.
+
+- **Back it up** somewhere safe and offline. If it is lost, existing installs can no
+  longer be updated, and everyone has to reinstall by hand.
+- **Never** commit it or add it to CI. Whoever holds it can send code to every user
+  as administrator.
+
+To create a key on a new checkout: `cargo run --example release_signing -- keygen`.
+This refuses to replace an existing key, because a new key cuts existing users off.
+
+### Testing an update
+
+`THERMAL_EYE_UPDATE_BASE` points the app at another folder of releases, such as a
+local web server. Signatures are still required, so this cannot be used to bypass them.
 
 ## Licence
 

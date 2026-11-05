@@ -2,6 +2,8 @@
 
 fn main() {
     println!("cargo:rerun-if-changed=assets/icon.ico");
+    // The version is embedded here too, so a bump must rebuild the resources.
+    println!("cargo:rerun-if-changed=Cargo.toml");
     let mut resource = winresource::WindowsResource::new();
     resource
         .set_icon("assets/icon.ico")

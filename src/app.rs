@@ -14,8 +14,10 @@ use crate::config::{self, Config};
 use crate::graph::{self, Line};
 use crate::history::Stats;
 use crate::logo;
-use crate::model::{Component, Core, Extra, Link, Monitor, Row, Unit};
+use crate::manifest;
+use crate::model::{Component, Core, Extra, Link, Monitor, Row, Unit, UpdateState};
 use crate::theme::*;
+use crate::update;
 use crate::window;
 
 pub const WIDTH: f32 = 600.0;
@@ -92,10 +94,19 @@ pub struct ThermalEye {
     logo: TextureHandle,
     settings_open: bool,
     requested_size: Vec2,
+    /// Just updated, and the user has not dismissed the notice yet.
+    just_updated: bool,
 }
 
 impl ThermalEye {
-    pub fn new(ctx: &Context, monitor: Arc<Mutex<Monitor>>, commands: Sender<Command>, config: Config) -> Self {
+    pub fn new(ctx: &Context, monitor: Arc<Mutex<Monitor>>, commands: Sender<Command>, mut config: Config) -> Self {
+        // Taken first, so that recording the version below counts as unsaved.
+        let saved = config.clone();
+        // No record means a fresh install, which has nothing to announce.
+        let just_updated = config.seen_version.as_deref().is_some_and(|seen| manifest::is_newer(update::CURRENT_VERSION, seen));
+        if !just_updated {
+            config.seen_version = Some(update::CURRENT_VERSION.to_owned());
+        }
         let mark = logo::decode(logo::MARK);
         let size = [mark.width as usize, mark.height as usize];
         let image = ColorImage::from_rgba_unmultiplied(size, &mark.rgba);
@@ -104,12 +115,13 @@ impl ThermalEye {
         Self {
             monitor,
             commands,
-            saved: config.clone(),
+            saved,
             config,
             last_save: Instant::now(),
             logo: ctx.load_texture("logo", image, filtering),
             settings_open: false,
             requested_size: Vec2::ZERO,
+            just_updated,
         }
     }
 
@@ -317,6 +329,32 @@ impl ThermalEye {
             if response.clicked() {
                 let _ = self.commands.send(command);
             }
+        }
+    }
+
+    /// Shown once after an update, until it is opened or dismissed.
+    fn updated_banner(&mut self, ui: &mut Ui, width: f32) {
+        let (rect, _) = ui.allocate_exact_size(vec2(width, BANNER_H), Sense::hover());
+        let y = rect.center().y;
+        ui.painter().rect_filled(rect, 0.0, NESTED_BG);
+        let text = format!("Updated to version {}", update::CURRENT_VERSION);
+        ui.painter().text(pos2(rect.left() + PAD, y), Align2::LEFT_CENTER, text, body(12.0), TEXT);
+
+        let close = Rect::from_center_size(pos2(rect.right() - PAD - 10.0, y), Vec2::splat(20.0));
+        let button = Rect::from_min_size(pos2(close.left() - 6.0 - 96.0, rect.top() + 6.0), vec2(96.0, 22.0));
+
+        let open = ui.interact(button, ui.scope_id().with("whats-new"), Sense::click());
+        chip_painter(ui.painter(), button, "What's new", false, open.hovered());
+        let dismiss = ui.interact(close, ui.scope_id().with("dismiss-update"), Sense::click()).on_hover_text("Dismiss");
+        let color = if dismiss.hovered() { TEXT } else { FAINT };
+        ui.painter().text(close.center(), Align2::CENTER_CENTER, icon::CLOSE.to_string(), icons(10.0), color);
+
+        if open.clicked() {
+            let _ = self.commands.send(Command::OpenReleaseNotes);
+        }
+        if open.clicked() || dismiss.clicked() {
+            self.just_updated = false;
+            self.config.seen_version = Some(update::CURRENT_VERSION.to_owned());
         }
     }
 
@@ -554,7 +592,7 @@ impl ThermalEye {
     }
 
     fn settings_height(&self) -> f32 {
-        SETTINGS_ROW_H * 4.0
+        SETTINGS_ROW_H * 6.0
     }
 
     fn settings_panel(&mut self, ui: &mut Ui, width: f32, monitor: &Monitor) {
@@ -608,6 +646,8 @@ impl ThermalEye {
             Link::Lost(_) => "Disconnected",
         };
         ui.painter().text(pos2(start, row(3.0)), Align2::LEFT_CENTER, status, body(12.5), TEXT);
+
+        self.update_settings(ui, monitor, rect, start);
     }
 
     fn autostart_setting(&mut self, ui: &mut Ui, monitor: &Monitor, panel: Rect, start: f32) {
@@ -623,6 +663,54 @@ impl ThermalEye {
                 let _ = self.commands.send(Command::SetAutostart(enable));
             }
         }
+    }
+
+    fn update_settings(&mut self, ui: &mut Ui, monitor: &Monitor, panel: Rect, start: f32) {
+        let left = panel.left() + PAD + X_NAME;
+        let auto_y = panel.top() + SETTINGS_ROW_H * 4.5;
+        ui.painter().text(pos2(left, auto_y), Align2::LEFT_CENTER, "Check for updates", body(12.5), MUTED);
+        for (index, (text, enable)) in [("Off", false), ("On", true)].into_iter().enumerate() {
+            let rect = Rect::from_min_size(pos2(start + index as f32 * 46.0, auto_y - 11.0), vec2(40.0, 22.0));
+            let response = ui.interact(rect, ui.scope_id().with(("updates", text)), Sense::click());
+            chip_painter(ui.painter(), rect, text, self.config.check_updates == enable, response.hovered());
+            if response.clicked() && self.config.check_updates != enable {
+                self.config.check_updates = enable;
+                let _ = self.commands.send(Command::SetAutomaticUpdates(enable));
+            }
+        }
+
+        let y = panel.top() + SETTINGS_ROW_H * 5.5;
+        let version = format!("Version {}", update::CURRENT_VERSION);
+        ui.painter().text(pos2(left, y), Align2::LEFT_CENTER, version, body(12.5), MUTED);
+
+        let busy = matches!(
+            monitor.update,
+            UpdateState::Checking | UpdateState::Downloading(_) | UpdateState::Installing(_)
+        );
+        let (label, command) = match &monitor.update {
+            UpdateState::Ready(_) => ("Install", Command::InstallUpdate),
+            _ => ("Check now", Command::CheckForUpdate),
+        };
+        let button = Rect::from_min_size(pos2(start, y - 11.0), vec2(86.0, 22.0));
+        if !busy {
+            let response = ui.interact(button, ui.scope_id().with("check-update"), Sense::click());
+            chip_painter(ui.painter(), button, label, false, response.hovered());
+            if response.clicked() {
+                let _ = self.commands.send(command);
+            }
+        }
+
+        let status = match &monitor.update {
+            UpdateState::Idle => String::new(),
+            UpdateState::Checking => "Checking…".to_owned(),
+            UpdateState::UpToDate => "Up to date".to_owned(),
+            UpdateState::Downloading(version) => format!("Downloading {version}…"),
+            UpdateState::Ready(version) => format!("{version} is ready"),
+            UpdateState::Installing(version) => format!("Installing {version}…"),
+            UpdateState::Failed(reason) => elide(reason, 44),
+        };
+        let x = if busy { start } else { button.right() + 10.0 };
+        ui.painter().text(pos2(x, y), Align2::LEFT_CENTER, status, body(11.5), FAINT);
     }
 
     fn compact_table(&mut self, ui: &mut Ui, width: f32, monitor: &Monitor) {
@@ -743,10 +831,19 @@ impl ThermalEye {
             Link::AwaitingConsent => Some(("Waiting for the Windows permission prompt…".into(), None)),
             Link::Lost(reason) => Some((reason.clone(), Some(("Reconnect", Command::Connect)))),
         };
+        let notice = notice.or_else(|| match &monitor.update {
+            UpdateState::Ready(version) => {
+                let text = if compact { format!("Update {version} ready") } else { format!("Version {version} is ready to install") };
+                Some((text, Some(("Install", Command::InstallUpdate))))
+            }
+            UpdateState::Installing(version) => Some((format!("Installing {version}…"), None)),
+            _ => None,
+        });
 
         let items = self.items(&monitor);
         let title_h = if compact { COMPACT_TITLE_H } else { TITLE_H };
-        let banner_h = if notice.is_some() { BANNER_H } else { 0.0 };
+        let show_updated = notice.is_none() && self.just_updated;
+        let banner_h = if notice.is_some() || show_updated { BANNER_H } else { 0.0 };
         let mut fixed = title_h + banner_h + BOTTOM_PAD;
         let mut table_h = 0.0;
         if compact {
@@ -769,6 +866,8 @@ impl ThermalEye {
         self.title_bar(ui, width, &mut reset);
         if let Some((message, action)) = &notice {
             self.banner(ui, width, message, *action);
+        } else if show_updated {
+            self.updated_banner(ui, width);
         }
 
         if compact {

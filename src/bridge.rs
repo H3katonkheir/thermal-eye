@@ -32,6 +32,8 @@ use windows::core::{Error, PCWSTR, w};
 use crate::autostart;
 use crate::driver;
 use crate::model::{Link, Monitor};
+use crate::update;
+use crate::window;
 
 const HELPER: &str = "thermal-eye-sensors.exe";
 const CONNECT_TIMEOUT_MS: u32 = 30_000;
@@ -47,6 +49,11 @@ pub enum Command {
     SetAutostart(bool),
     /// Show where to get the driver.
     OpenDriverPage,
+    /// Show what changed in the running version.
+    OpenReleaseNotes,
+    CheckForUpdate,
+    InstallUpdate,
+    SetAutomaticUpdates(bool),
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -72,6 +79,7 @@ enum Ended {
 struct Shared {
     monitor: Arc<Mutex<Monitor>>,
     ctx: egui::Context,
+    updates: Sender<update::Request>,
 }
 
 impl Shared {
@@ -84,7 +92,11 @@ impl Shared {
     fn handle(&self, command: Command) {
         match command {
             Command::Connect => {}
-            Command::OpenDriverPage => driver::open_download_page(),
+            Command::OpenDriverPage => window::open_url(driver::DOWNLOAD_PAGE),
+            Command::OpenReleaseNotes => window::open_url(&update::release_notes_url()),
+            Command::CheckForUpdate => drop(self.updates.send(update::Request::Check)),
+            Command::InstallUpdate => drop(self.updates.send(update::Request::Install)),
+            Command::SetAutomaticUpdates(on) => drop(self.updates.send(update::Request::SetAutomatic(on))),
             Command::SetAutostart(enable) => {
                 if autostart::set(enable) {
                     self.update(|monitor| monitor.autostart = enable);
@@ -95,9 +107,10 @@ impl Shared {
 }
 
 /// Starts the background thread that keeps the helper running.
-pub fn start(monitor: Arc<Mutex<Monitor>>, ctx: egui::Context, elevate: bool) -> Sender<Command> {
+pub fn start(monitor: Arc<Mutex<Monitor>>, ctx: egui::Context, elevate: bool, check_updates: bool) -> Sender<Command> {
     let (commands, inbox) = channel();
-    let shared = Shared { monitor, ctx };
+    let updates = update::start(monitor.clone(), ctx.clone(), check_updates);
+    let shared = Shared { monitor, ctx, updates };
     std::thread::spawn(move || {
         let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) };
         let enabled = autostart::is_enabled();
@@ -178,7 +191,7 @@ fn wide(text: impl AsRef<std::ffi::OsStr>) -> Vec<u16> {
     text.as_ref().encode_wide().chain(Some(0)).collect()
 }
 
-struct Handle(HANDLE);
+pub struct Handle(pub HANDLE);
 
 impl Drop for Handle {
     fn drop(&mut self) {
@@ -186,7 +199,7 @@ impl Drop for Handle {
     }
 }
 
-fn launch_helper(path: &Path, parameters: &str, elevate: bool) -> Result<Handle, Error> {
+pub fn launch(path: &Path, parameters: &str, elevate: bool) -> Result<Handle, Error> {
     let file = wide(path);
     let parameters = wide(parameters);
     let mut info = SHELLEXECUTEINFOW {
@@ -241,7 +254,7 @@ fn session(shared: &Shared, inbox: &Receiver<Command>, launch: Launch) -> Ended 
         }
         None
     } else {
-        match launch_helper(&helper, &format!("--pipe {short_name}"), launch == Launch::Elevated) {
+        match self::launch(&helper, &format!("--pipe {short_name}"), launch == Launch::Elevated) {
             Ok(process) => Some(process),
             Err(e) if e.code() == ERROR_CANCELLED.to_hresult() => return Ended::Declined,
             Err(e) => return Ended::Failed(format!("Could not start the sensor helper: {}", e.message())),

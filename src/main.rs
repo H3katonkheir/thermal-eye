@@ -8,9 +8,11 @@ mod driver;
 mod graph;
 mod history;
 mod logo;
+mod manifest;
 mod model;
 mod theme;
 mod topology;
+mod update;
 mod window;
 
 use std::path::PathBuf;
@@ -46,6 +48,7 @@ fn main() -> eframe::Result {
     if config.always_on_top {
         viewport = viewport.with_always_on_top();
     }
+    let check_updates = config.check_updates;
     let position = config.position.filter(|p| window::is_on_screen(*p));
 
     let options = eframe::NativeOptions {
@@ -69,7 +72,7 @@ fn main() -> eframe::Result {
             let monitor = Arc::new(Mutex::new(Monitor::new(Topology::read())));
             let commands = match replay {
                 Some(path) => bridge::replay(path, monitor.clone(), ctx.clone()),
-                None => bridge::start(monitor.clone(), ctx.clone(), !flag("--no-elevate")),
+                None => bridge::start(monitor.clone(), ctx.clone(), !flag("--no-elevate"), check_updates),
             };
             Ok(Box::new(ThermalEye::new(&ctx, monitor, commands, config)))
         }),

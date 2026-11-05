@@ -304,6 +304,131 @@ fn asking_for_admin_access_comes_before_the_driver_notice() {
 }
 
 #[test]
+fn a_ready_update_is_offered_and_installs_on_click() {
+    let mut widget = Harness::new(Config::default());
+    {
+        let mut monitor = widget.monitor.lock().unwrap();
+        monitor.link = Link::Connected { elevated: true };
+        monitor.update = UpdateState::Ready("9.9.9".into());
+    }
+    widget.frame(Vec::new());
+    widget.click((WIDTH - PAD - 48.0, TITLE_H + BANNER_H / 2.0));
+    assert!(matches!(widget.inbox.try_recv(), Ok(Command::InstallUpdate)));
+}
+
+#[test]
+fn sensor_problems_outrank_the_update_notice() {
+    let mut widget = Harness::new(Config::default());
+    {
+        let mut monitor = widget.monitor.lock().unwrap();
+        monitor.link = Link::Connected { elevated: false };
+        monitor.update = UpdateState::Ready("9.9.9".into());
+    }
+    widget.frame(Vec::new());
+    widget.click((WIDTH - PAD - 48.0, TITLE_H + BANNER_H / 2.0));
+    assert!(matches!(widget.inbox.try_recv(), Ok(Command::Connect)));
+}
+
+#[test]
+fn settings_can_check_for_updates_and_turn_checks_off() {
+    let mut widget = Harness::new(Config::default());
+    widget.monitor.lock().unwrap().link = Link::Connected { elevated: true };
+    widget.frame(Vec::new());
+    widget.click(full_button(6));
+    let top = widget.height() - BOTTOM_PAD - widget.app.settings_height();
+    let left = PAD + X_NAME + 150.0;
+
+    widget.click((left + 40.0, top + SETTINGS_ROW_H * 5.5));
+    assert!(matches!(widget.inbox.try_recv(), Ok(Command::CheckForUpdate)));
+
+    widget.click((left + 20.0, top + SETTINGS_ROW_H * 4.5));
+    assert!(!widget.app.config.check_updates);
+    assert!(matches!(widget.inbox.try_recv(), Ok(Command::SetAutomaticUpdates(false))));
+}
+
+#[test]
+fn nothing_can_be_clicked_while_an_update_is_in_progress() {
+    let mut widget = Harness::new(Config::default());
+    widget.monitor.lock().unwrap().update = UpdateState::Downloading("9.9.9".into());
+    widget.frame(Vec::new());
+    widget.click(full_button(6));
+    let top = widget.height() - BOTTOM_PAD - widget.app.settings_height();
+    widget.click((PAD + X_NAME + 190.0, top + SETTINGS_ROW_H * 5.5));
+    assert!(widget.inbox.try_recv().is_err());
+}
+
+/// A widget that last ran `seen` and is otherwise healthy.
+fn widget_after(seen: Option<&str>) -> Harness {
+    let config = Config { seen_version: seen.map(str::to_owned), ..Config::default() };
+    let mut widget = Harness::new(config);
+    widget.monitor.lock().unwrap().link = Link::Connected { elevated: true };
+    widget.frame(Vec::new());
+    widget
+}
+
+const BANNER_Y: f32 = TITLE_H + BANNER_H / 2.0;
+const WHATS_NEW_X: f32 = WIDTH - PAD - 20.0 - 6.0 - 48.0;
+const DISMISS_X: f32 = WIDTH - PAD - 10.0;
+
+#[test]
+fn a_fresh_install_announces_nothing_and_records_the_version() {
+    let widget = widget_after(None);
+    assert!(!widget.app.just_updated);
+    assert_eq!(widget.app.config.seen_version.as_deref(), Some(update::CURRENT_VERSION));
+}
+
+#[test]
+fn a_new_install_writes_its_version_to_disk() {
+    // Otherwise the first update would look like a fresh install and say nothing.
+    let widget = widget_after(None);
+    assert_ne!(widget.app.saved, widget.app.config, "the version is waiting to be saved");
+}
+
+#[test]
+fn the_same_version_announces_nothing() {
+    assert!(!widget_after(Some(update::CURRENT_VERSION)).app.just_updated);
+}
+
+#[test]
+fn whats_new_opens_the_release_notes_and_clears_the_notice() {
+    let mut widget = widget_after(Some("0.0.1"));
+    assert!(widget.app.just_updated);
+    let with_banner = widget.height();
+
+    widget.click((WHATS_NEW_X, BANNER_Y));
+    assert!(matches!(widget.inbox.try_recv(), Ok(Command::OpenReleaseNotes)));
+    assert!(!widget.app.just_updated);
+    assert_eq!(widget.app.config.seen_version.as_deref(), Some(update::CURRENT_VERSION));
+    assert_eq!(widget.height(), with_banner - BANNER_H, "the window shrinks back");
+}
+
+#[test]
+fn dismissing_the_notice_opens_nothing_and_it_stays_gone() {
+    let mut widget = widget_after(Some("0.0.1"));
+    widget.click((DISMISS_X, BANNER_Y));
+    assert!(widget.inbox.try_recv().is_err());
+    assert!(!widget.app.just_updated);
+
+    let saved = widget.app.config.seen_version.clone();
+    assert!(!widget_after(saved.as_deref()).app.just_updated);
+}
+
+#[test]
+fn the_notice_waits_while_a_sensor_problem_is_showing() {
+    let mut widget = widget_after(Some("0.0.1"));
+    widget.monitor.lock().unwrap().link = Link::Connected { elevated: false };
+    widget.frame(Vec::new());
+    widget.click((WIDTH - PAD - 48.0, BANNER_Y));
+    assert!(matches!(widget.inbox.try_recv(), Ok(Command::Connect)));
+    assert!(widget.app.just_updated, "still waiting to be seen");
+}
+
+#[test]
+fn release_notes_point_at_the_running_version() {
+    assert!(update::release_notes_url().ends_with(&format!("/releases/tag/v{}", update::CURRENT_VERSION)));
+}
+
+#[test]
 fn limited_access_offers_a_way_to_elevate() {
     let mut widget = Harness::new(Config::default());
     widget.monitor.lock().unwrap().link = Link::Connected { elevated: false };

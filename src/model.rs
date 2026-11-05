@@ -114,6 +114,19 @@ impl Component {
     }
 }
 
+/// Progress of the updater. Versions are the release being offered.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum UpdateState {
+    #[default]
+    Idle,
+    Checking,
+    UpToDate,
+    Downloading(String),
+    Ready(String),
+    Installing(String),
+    Failed(String),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Link {
     Starting,
@@ -168,6 +181,7 @@ pub struct Monitor {
     pub autostart: bool,
     /// The PawnIO driver is not installed, so most temperatures are unavailable.
     pub driver_missing: bool,
+    pub update: UpdateState,
     pub components: Vec<Component>,
     pub history: History,
     topology: Topology,
@@ -182,6 +196,7 @@ impl Monitor {
             link: Link::Starting,
             autostart: false,
             driver_missing: false,
+            update: UpdateState::Idle,
             components: Vec::new(),
             history: History::default(),
             topology,

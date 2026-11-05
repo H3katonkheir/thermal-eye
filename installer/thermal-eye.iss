@@ -37,7 +37,7 @@ WizardStyle=modern
 Name: autostart; Description: "Start with Windows"
 Name: desktopicon; Description: "Create a desktop shortcut"; Flags: unchecked
 Name: pawnio; Description: "Install the PawnIO driver (needed for CPU, RAM and motherboard temperatures)"; \
-    GroupDescription: "Hardware access (the FACEIT anti-cheat blocks this driver):"; Check: NeedsPawnIO
+    GroupDescription: "Hardware access (the FACEIT anti-cheat blocks this driver):"; Check: NeedsPawnIO and not IsUpdate
 
 [Files]
 Source: "..\dist\thermal-eye.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -53,12 +53,14 @@ Name: "{autodesktop}\Thermal Eye"; Filename: "{app}\thermal-eye.exe"; Tasks: des
 Filename: "{app}\thermal-eye-sensors.exe"; Parameters: "--register-task"; Flags: runhidden waituntilterminated; \
     StatusMsg: "Setting up sensor access..."
 ; As the signed-in user: the startup entry belongs to them, not to the elevated installer.
-Filename: "{app}\thermal-eye.exe"; Parameters: "--autostart on"; Tasks: autostart; \
+Filename: "{app}\thermal-eye.exe"; Parameters: "--autostart on"; Tasks: autostart; Check: not IsUpdate; \
     Flags: runasoriginaluser runhidden waituntilterminated
-Filename: "{app}\thermal-eye.exe"; Parameters: "--autostart off"; Tasks: not autostart; \
+Filename: "{app}\thermal-eye.exe"; Parameters: "--autostart off"; Tasks: not autostart; Check: not IsUpdate; \
     Flags: runasoriginaluser runhidden waituntilterminated
 Filename: "{app}\thermal-eye.exe"; Description: "Open Thermal Eye"; \
     Flags: postinstall nowait skipifsilent runasoriginaluser
+; After an in-app update, reopen what the update closed.
+Filename: "{app}\thermal-eye.exe"; Flags: nowait runasoriginaluser; Check: IsUpdate
 
 [UninstallRun]
 Filename: "{app}\thermal-eye.exe"; Parameters: "--autostart off"; Flags: runhidden; RunOnceId: "RemoveStartupEntry"
@@ -77,6 +79,13 @@ const
 
 var
   RestartNeeded: Boolean;
+
+// Set by the widget when it runs an update. An update must leave the user's
+// choices alone, such as having turned off Start with Windows or skipped PawnIO.
+function IsUpdate: Boolean;
+begin
+  Result := ExpandConstant('{param:update|0}') = '1';
+end;
 
 function NeedsPawnIO: Boolean;
 begin

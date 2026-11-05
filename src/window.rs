@@ -7,8 +7,9 @@ use windows::Win32::Graphics::Dwm::{
 };
 use windows::Win32::Graphics::Gdi::{MONITOR_DEFAULTTONULL, MonitorFromPoint};
 use windows::Win32::System::Threading::CreateMutexW;
+use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    FindWindowW, GetWindowRect, IsIconic, SW_RESTORE, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
+    FindWindowW, GetWindowRect, IsIconic, SW_RESTORE, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
     SetForegroundWindow, SetWindowPos, ShowWindow,
 };
 use windows::core::{HSTRING, w};
@@ -29,6 +30,11 @@ pub fn claim_single_instance() -> bool {
         }
         false
     }
+}
+
+pub fn open_url(url: &str) {
+    let url = HSTRING::from(url);
+    let _ = unsafe { ShellExecuteW(None, w!("open"), &url, None, None, SW_SHOWNORMAL) };
 }
 
 fn hwnd(window: &impl HasWindowHandle) -> Option<HWND> {

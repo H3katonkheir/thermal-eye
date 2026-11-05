@@ -18,7 +18,7 @@ const LEFT_AXIS: f32 = 36.0;
 const RIGHT_AXIS: f32 = 36.0;
 const BOTTOM_AXIS: f32 = 18.0;
 const SCALE_MAX: f32 = 100.0;
-const TOOLTIP_LINES: usize = 12;
+pub const TOOLTIP_LINES: usize = 12;
 const USAGE_OPACITY: f32 = 0.5;
 
 fn to_screen(plot: Rect, index: usize, count: usize, value: f32) -> Pos2 {
@@ -118,12 +118,17 @@ fn hover(ui: &Ui, rect: Rect, plot: Rect, pointer: Pos2, lines: &[Line], seconds
     if entries.is_empty() {
         return;
     }
-    entries.truncate(TOOLTIP_LINES);
+    let (row, heading_h, margin) = (16.0, 24.0, 2.0);
+    // As many lines as fit inside the graph, which is shorter than TOOLTIP_LINES needs.
+    let room = ((rect.height() - heading_h - 2.0 * margin) / row).floor().max(1.0) as usize;
+    entries.truncate(TOOLTIP_LINES.min(room));
 
-    let row = 16.0;
-    let size = vec2(170.0, 24.0 + row * entries.len() as f32);
+    let size = vec2(170.0, heading_h + row * entries.len() as f32);
     let side = if pointer.x + 12.0 + size.x < plot.right() { 12.0 } else { -12.0 - size.x };
-    let top = (pointer.y - size.y / 2.0).clamp(rect.top() + 2.0, (rect.bottom() - size.y - 2.0).max(rect.top()));
+    // Kept inside the graph; a tooltip taller than it starts at the top instead.
+    let highest = rect.top() + margin;
+    let lowest = (rect.bottom() - size.y - margin).max(highest);
+    let top = (pointer.y - size.y / 2.0).clamp(highest, lowest);
     let panel = Rect::from_min_size(pos2(pointer.x + side, top), size);
 
     painter.rect_filled(panel, 6.0, TITLE_BG.gamma_multiply(0.96));

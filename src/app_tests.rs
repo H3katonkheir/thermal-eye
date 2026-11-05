@@ -274,6 +274,26 @@ fn hovering_the_graph_is_safe_with_and_without_lines() {
 }
 
 #[test]
+fn hovering_a_graph_with_many_lines_does_not_crash() {
+    // More lines than the tooltip has room for in the plot's height.
+    let mut graphed = vec!["cpu".to_owned(), "gpu0".to_owned(), "ram".to_owned()];
+    graphed.extend((0..16).map(|core| format!("core:{core}")));
+    let config = Config { graph_open: true, expanded: vec!["cpu".into()], graphed, ..Config::default() };
+    let mut widget = Harness::new(config);
+    let monitor = widget.monitor.clone();
+    let lines = widget.app.graph_lines(&monitor.lock().unwrap(), 60, 100).len();
+    assert!(lines > graph::TOOLTIP_LINES, "only {lines} lines");
+
+    let bottom = widget.height() - BOTTOM_PAD;
+    // The test data is a few seconds old, so only the right end of the plot has values.
+    for y in [bottom - GRAPH_PLOT_H + 8.0, bottom - GRAPH_PLOT_H / 2.0, bottom - 30.0] {
+        for x in (40..widget.width() as usize - 20).step_by(4) {
+            widget.frame(vec![Event::PointerMoved(pos2(x as f32, y))]);
+        }
+    }
+}
+
+#[test]
 fn reset_forgets_highs() {
     let mut widget = Harness::new(Config::default());
     widget.click(full_button(5));

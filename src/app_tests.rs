@@ -35,6 +35,11 @@ fn full_button(index: usize) -> (f32, f32) {
     button(index, 30.0, WIDTH, TITLE_H)
 }
 
+/// Distance from the top of the settings panel to the middle of a row.
+fn row_middle(row: usize) -> f32 {
+    SETTINGS_ROW_H * (row as f32 + 0.5)
+}
+
 /// Text, and the part of it left visible by its clip rect, as when a scroll area hides rows.
 fn collect_text(shape: &egui::Shape, clip: Rect, into: &mut Vec<(String, Rect)>) {
     match shape {
@@ -317,12 +322,12 @@ fn settings_switch_units_and_hide_components() {
     assert!(widget.app.settings_open);
     let top = widget.height() - BOTTOM_PAD - widget.app.settings_height();
     let left = PAD + X_NAME + 150.0;
-    widget.click((left + 46.0 + 20.0, top + SETTINGS_ROW_H / 2.0));
+    widget.click((left + 46.0 + 20.0, top + row_middle(settings::UNIT_ROW)));
     assert!(widget.app.config.fahrenheit);
     assert_eq!(widget.app.temp(Some(100.0)), "212°");
 
     let top = widget.height() - BOTTOM_PAD - widget.app.settings_height();
-    widget.click((left + 10.0, top + SETTINGS_ROW_H * 1.5));
+    widget.click((left + 10.0, top + row_middle(settings::COMPONENTS_ROW)));
     assert_eq!(widget.app.config.hidden, ["cpu"]);
     let monitor = widget.monitor.clone();
     assert_eq!(widget.app.visible(&monitor.lock().unwrap()).len(), 4);
@@ -333,7 +338,7 @@ fn start_with_windows_asks_only_when_the_setting_changes() {
     let mut widget = Harness::new(Config::default());
     widget.click(full_button(6));
     let top = widget.height() - BOTTOM_PAD - widget.app.settings_height();
-    let (y, left) = (top + SETTINGS_ROW_H * 3.5, PAD + X_NAME + 150.0);
+    let (y, left) = (top + row_middle(settings::AUTOSTART_ROW), PAD + X_NAME + 150.0);
 
     widget.click((left + 20.0, y));
     assert!(widget.inbox.try_recv().is_err(), "already off");
@@ -444,10 +449,10 @@ fn settings_can_check_for_updates_and_turn_checks_off() {
     let top = widget.height() - BOTTOM_PAD - widget.app.settings_height();
     let left = PAD + X_NAME + 150.0;
 
-    widget.click((left + 40.0, top + SETTINGS_ROW_H * 6.5));
+    widget.click((left + 40.0, top + row_middle(settings::VERSION_ROW)));
     assert!(matches!(widget.inbox.try_recv(), Ok(Command::CheckForUpdate)));
 
-    widget.click((left + 20.0, top + SETTINGS_ROW_H * 5.5));
+    widget.click((left + 20.0, top + row_middle(settings::UPDATES_ROW)));
     assert!(!widget.app.config.check_updates);
     assert!(matches!(widget.inbox.try_recv(), Ok(Command::SetAutomaticUpdates(false))));
 }
@@ -459,7 +464,7 @@ fn nothing_can_be_clicked_while_an_update_is_in_progress() {
     widget.frame(Vec::new());
     widget.click(full_button(6));
     let top = widget.height() - BOTTOM_PAD - widget.app.settings_height();
-    widget.click((PAD + X_NAME + 190.0, top + SETTINGS_ROW_H * 6.5));
+    widget.click((PAD + X_NAME + 190.0, top + row_middle(settings::VERSION_ROW)));
     assert!(widget.inbox.try_recv().is_err());
 }
 
@@ -541,7 +546,7 @@ fn copy_details_puts_the_report_on_the_clipboard() {
     widget.frame(Vec::new());
     widget.click(full_button(6));
     let top = widget.height() - BOTTOM_PAD - widget.app.settings_height();
-    widget.click((PAD + X_NAME + 150.0 + 40.0, top + SETTINGS_ROW_H * 7.5));
+    widget.click((PAD + X_NAME + 150.0 + 40.0, top + row_middle(settings::DIAGNOSTICS_ROW)));
     assert_eq!(widget.copied.len(), 1);
     assert!(widget.copied[0].contains("AMD Ryzen 9 9950X3D"));
 }
@@ -726,7 +731,7 @@ fn the_core_dropdown_shows_the_lowest_clock_under_min() {
 /// Clicks the Min or Max chip in the settings panel.
 fn toggle_column(widget: &mut Harness, index: usize) {
     let top = widget.height() - BOTTOM_PAD - widget.app.settings_height();
-    widget.click((PAD + X_NAME + 150.0 + index as f32 * 46.0 + 20.0, top + SETTINGS_ROW_H * 2.5));
+    widget.click((PAD + X_NAME + 150.0 + index as f32 * 46.0 + 20.0, top + row_middle(settings::COLUMNS_ROW)));
 }
 
 #[test]
@@ -987,3 +992,15 @@ fn using_a_dot_also_dismisses_the_graph_tip() {
     assert!(!widget.shows(GRAPH_TIP));
     assert_eq!(widget.height(), with_tip - GRAPH_TIP_H);
 }
+
+#[test]
+fn sensor_access_heads_the_settings() {
+    let mut widget = Harness::new(Config::default());
+    widget.click(full_button(6));
+    let label = |text: &str| widget.drawn.iter().find(|(drawn, _)| drawn == text).unwrap().1.top();
+    let access = label("Sensor access");
+    for other in ["Temperature unit", "Show components", "Show columns", "Start with Windows", "Check for updates", "Diagnostics"] {
+        assert!(access < label(other), "Sensor access should come before {other}");
+    }
+}
+

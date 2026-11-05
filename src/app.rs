@@ -527,6 +527,8 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
         }
         if response.clicked() {
             config::toggle(&mut self.config.graphed, key);
+            // Using a dot shows the tip has done its job.
+            self.config.graph_tip_dismissed = true;
         }
     }
 

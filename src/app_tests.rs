@@ -974,3 +974,16 @@ fn a_dismissed_graph_tip_stays_gone() {
     let saved: Config = serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
     assert!(saved.graph_tip_dismissed, "kept with the other settings");
 }
+
+#[test]
+fn using_a_dot_also_dismisses_the_graph_tip() {
+    let mut widget = Harness::new(Config { graph_open: true, graphed: Vec::new(), ..Config::default() });
+    assert!(widget.shows(GRAPH_TIP));
+    let with_tip = widget.height();
+
+    widget.click((dot_x(), row_y(1)));
+    assert_eq!(widget.app.config.graphed, ["gpu0"]);
+    assert!(widget.app.config.graph_tip_dismissed);
+    assert!(!widget.shows(GRAPH_TIP));
+    assert_eq!(widget.height(), with_tip - GRAPH_TIP_H);
+}

@@ -887,3 +887,13 @@ fn clicking_the_ring_still_opens_the_row() {
     widget.click(ring_at(0));
     assert_eq!(widget.app.config.expanded, ["cpu"]);
 }
+
+#[test]
+fn the_ring_tooltip_sits_by_the_ring() {
+    let mut widget = Harness::new(Config::default());
+    let (x, y) = ring_at(0);
+    widget.hover((x, y));
+    let tooltip = widget.drawn.iter().find(|(text, _)| text.starts_with("Warning from")).expect("no tooltip").1;
+    assert!((tooltip.left() - x).abs() < 40.0, "tooltip starts at x {}, ring is at {x}", tooltip.left());
+    assert!(tooltip.top() > y && tooltip.top() - y < 40.0, "tooltip starts at y {}, ring is at {y}", tooltip.top());
+}

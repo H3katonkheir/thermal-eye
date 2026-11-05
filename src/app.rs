@@ -563,9 +563,11 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
         if let Some(now) = high.now {
             let fraction = now / critical;
             ring(painter, ring_center, RING_RADIUS, fraction, heat_ring(now, warn, critical));
-            if ui.rect_contains_pointer(Rect::from_center_size(ring_center, Vec2::splat(RING_RADIUS * 2.0 + 8.0))) {
-                response.clone().on_hover_text(self.limits_help(warn, critical));
-            }
+            // Its own hover area, so the tooltip sits by the ring rather than under the
+            // row. Sensing hover alone leaves clicks to the row.
+            let ring_rect = Rect::from_center_size(ring_center, Vec2::splat(RING_RADIUS * 2.0 + 8.0));
+            ui.interact(ring_rect, ui.scope_id().with(("ring", &component.key)), Sense::hover())
+                .on_hover_text(self.limits_help(warn, critical));
         }
         let tint = |value: Option<f32>| value.map_or(FAINT, |v| heat_text(v, warn, critical));
         let columns = self.columns();

@@ -737,17 +737,19 @@ fn hiding_min_and_max_narrows_the_window() {
 
     toggle_column(&mut widget, 0);
     assert!(!widget.app.config.columns.min);
-    assert!(!widget.shows("MIN") && widget.shows("MAX"));
     assert_eq!(widget.width(), WIDTH - TEMP_STEP);
 
     toggle_column(&mut widget, 1);
     assert!(!widget.app.config.columns.max);
-    assert!(!widget.shows("MIN") && !widget.shows("MAX"));
     assert_eq!(widget.width(), WIDTH - 2.0 * TEMP_STEP);
 
     toggle_column(&mut widget, 0);
-    assert!(widget.shows("MIN") && !widget.shows("MAX"));
     assert_eq!(widget.width(), WIDTH - TEMP_STEP);
+
+    // Settings cover the table, so the headings show once they close.
+    let width = widget.width();
+    widget.click(button(6, 30.0, width, TITLE_H));
+    assert!(widget.shows("MIN") && !widget.shows("MAX"));
 }
 
 #[test]
@@ -826,13 +828,19 @@ fn every_layout_fits_its_text() {
                             seen_version: seen.map(str::to_owned),
                             ..Config::default()
                         };
-                        let mut widget = Harness::new(config);
-                        set_up(&mut widget.monitor.lock().unwrap());
-                        widget.app.settings_open = !compact;
-                        widget.frame(Vec::new());
-                        widget.frame(Vec::new());
-                        let case = format!("compact {compact}, min {min}, max {max}, {window_seconds}s, {notice}, seen {seen:?}");
-                        assert_tidy(&widget, &case);
+                        // The full view is checked with settings open, then with the graph.
+                        for settings in if compact { vec![false] } else { vec![true, false] } {
+                            let config = Config { graph_open: !compact && !settings, ..config.clone() };
+                            let mut widget = Harness::new(config);
+                            set_up(&mut widget.monitor.lock().unwrap());
+                            widget.app.settings_open = settings;
+                            widget.frame(Vec::new());
+                            widget.frame(Vec::new());
+                            let case = format!(
+                                "compact {compact}, settings {settings}, min {min}, max {max}, {window_seconds}s, {notice}, seen {seen:?}"
+                            );
+                            assert_tidy(&widget, &case);
+                        }
                     }
                 }
             }

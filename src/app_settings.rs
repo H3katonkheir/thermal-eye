@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use eframe::egui::{Align2, Rect, Sense, Stroke, Ui, pos2, vec2};
 
-use super::{COPIED_NOTE_TIME, PAD, SETTINGS_ROW_H, ThermalEye, X_NAME, elide, is_live, show_full_text};
+use super::{COPIED_NOTE_TIME, HEADER_H, PAD, SETTINGS_ROW_H, ThermalEye, X_NAME, elide, is_live, show_full_text};
 use crate::bridge::Command;
 use crate::config;
 use crate::diagnostics;
@@ -68,6 +68,19 @@ fn sensor_access(monitor: &Monitor) -> &'static str {
 impl ThermalEye {
     pub(super) fn settings_height(&self) -> f32 {
         SETTINGS_ROW_H * ROWS as f32
+    }
+
+    /// Heading of the settings view, with the way back to the table.
+    pub(super) fn settings_header(&mut self, ui: &mut Ui, width: f32) {
+        let (rect, _) = ui.allocate_exact_size(vec2(width, HEADER_H), Sense::hover());
+        let y = rect.center().y;
+        caps(ui.painter(), pos2(rect.left() + PAD + X_NAME, y), Align2::LEFT_CENTER, "SETTINGS", FAINT);
+        let done = Rect::from_min_size(pos2(rect.right() - PAD - 64.0, y - 10.0), vec2(64.0, 20.0));
+        let response = ui.interact(done, ui.scope_id().with("settings-done"), Sense::click());
+        chip_painter(ui.painter(), done, "Done", false, response.hovered());
+        if response.clicked() {
+            self.settings_open = false;
+        }
     }
 
     pub(super) fn settings_panel(&mut self, ui: &mut Ui, width: f32, monitor: &Monitor) {

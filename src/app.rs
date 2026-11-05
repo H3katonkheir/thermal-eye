@@ -360,6 +360,8 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
         let (glyph, tip) = if compact { (icon::FULL, "Full view") } else { (icon::COMPACT, "Compact view") };
         if self.icon_button(ui, size_button, glyph, false, tip) {
             self.config.compact = !compact;
+            // The compact view has no settings, so leaving it should not land in them.
+            self.settings_open = false;
         }
 
         let pin = next();
@@ -854,6 +856,8 @@ impl ThermalEye {
         if compact {
             let rows = self.visible(&monitor).len() as f32;
             fixed += COMPACT_HEAD_H + rows * COMPACT_ROW_H;
+        } else if self.settings_open {
+            fixed += HEADER_H + self.settings_height();
         } else {
             fixed += HEADER_H;
             if self.config.graph_open {
@@ -861,9 +865,6 @@ impl ThermalEye {
                 if !self.config.graph_tip_dismissed {
                     fixed += GRAPH_TIP_H;
                 }
-            }
-            if self.settings_open {
-                fixed += self.settings_height();
             }
             table_h = items.iter().map(Item::height).sum();
         }
@@ -880,6 +881,10 @@ impl ThermalEye {
 
         if compact {
             self.compact_table(ui, width, &monitor);
+        } else if self.settings_open {
+            // Settings take the whole window, in place of the table and graph.
+            self.settings_header(ui, width);
+            self.settings_panel(ui, width, &monitor);
         } else {
             self.table_header(ui, width);
             ScrollArea::vertical()
@@ -899,9 +904,6 @@ impl ThermalEye {
                         }
                     }
                 });
-            if self.settings_open {
-                self.settings_panel(ui, width, &monitor);
-            }
             if self.config.graph_open {
                 self.graph_panel(ui, width, &monitor);
                 if !self.config.graph_tip_dismissed {

@@ -129,7 +129,7 @@ impl ThermalEye {
         }
     }
 
-    /// In Live there is no span, so high and average would just repeat the reading.
+    /// In Live there is no span, so the high would just repeat the reading.
     fn is_live(&self) -> bool {
         self.config.window_seconds == WINDOWS[0].1
     }
@@ -394,13 +394,11 @@ impl ThermalEye {
         let painter = ui.painter();
         let at = |offset: f32| pos2(left + offset, y);
         let live = self.is_live();
-        if live {
-            caps(painter, at(X_NOW), Align2::RIGHT_CENTER, "TEMP", FAINT);
-        } else {
-            caps(painter, at(X_NOW), Align2::RIGHT_CENTER, "NOW", FAINT);
+        caps(painter, at(X_NOW), Align2::RIGHT_CENTER, "NOW", FAINT);
+        if !live {
             caps(painter, at(X_HIGH), Align2::RIGHT_CENTER, "HIGH", FAINT);
-            caps(painter, at(X_AVG), Align2::RIGHT_CENTER, "AVG", FAINT);
         }
+        caps(painter, at(X_AVG), Align2::RIGHT_CENTER, "AVG", FAINT);
         caps(painter, at(X_BAR_LEFT), Align2::LEFT_CENTER, "USAGE", FAINT);
         let span = ui.interact(
             Rect::from_min_max(pos2(left + X_RING, rect.top()), pos2(left + X_PERCENT, rect.bottom())),
@@ -408,7 +406,7 @@ impl ThermalEye {
             Sense::hover(),
         );
         span.on_hover_text(if live {
-            "TEMP: hottest sensor right now\nUSAGE: usage right now"
+            "NOW: hottest sensor right now\nAVG: mean of the component's sensors right now\nUSAGE: usage right now"
         } else {
             "NOW: hottest sensor right now\nHIGH: hottest any sensor got in the selected span\n\
              AVG: mean of the component's sensors over the span\nUSAGE: mean usage over the span"
@@ -488,8 +486,8 @@ impl ThermalEye {
         if !self.is_live() {
             let high_color = high.high.map_or(FAINT, |v| heat_text(v, warn, critical));
             painter.text(pos2(left + X_HIGH, y), Align2::RIGHT_CENTER, self.temp(high.high), strong(13.5), high_color);
-            painter.text(pos2(left + X_AVG, y), Align2::RIGHT_CENTER, self.temp(avg.avg), body(13.5), MUTED);
         }
+        painter.text(pos2(left + X_AVG, y), Align2::RIGHT_CENTER, self.temp(avg.avg), body(13.5), MUTED);
 
         let usage = component.usage.and_then(|id| monitor.stats(id, seconds).avg);
         self.usage_cell(ui, rect, usage, 8.0, PURPLE);
@@ -520,8 +518,8 @@ impl ThermalEye {
         painter.text(pos2(left + X_NOW, y), Align2::RIGHT_CENTER, self.temp(stats.now), strong(12.5), tint(stats.now));
         if !self.is_live() {
             painter.text(pos2(left + X_HIGH, y), Align2::RIGHT_CENTER, self.temp(stats.high), body(12.5), tint(stats.high));
-            painter.text(pos2(left + X_AVG, y), Align2::RIGHT_CENTER, self.temp(stats.avg), body(12.5), MUTED);
         }
+        painter.text(pos2(left + X_AVG, y), Align2::RIGHT_CENTER, self.temp(stats.avg), body(12.5), MUTED);
 
         if let Some(usage) = row.usage {
             let value = monitor.stats(usage, seconds).avg;
@@ -777,13 +775,11 @@ impl ThermalEye {
         let painter = ui.painter();
         let y = head.center().y + 1.0;
         let live = self.is_live();
-        if live {
-            caps(painter, pos2(left + X_NOW, y), Align2::RIGHT_CENTER, "TEMP", FAINT);
-        } else {
-            caps(painter, pos2(left + X_NOW, y), Align2::RIGHT_CENTER, "NOW", FAINT);
+        caps(painter, pos2(left + X_NOW, y), Align2::RIGHT_CENTER, "NOW", FAINT);
+        if !live {
             caps(painter, pos2(left + X_HIGH, y), Align2::RIGHT_CENTER, "HIGH", FAINT);
-            caps(painter, pos2(left + X_AVG, y), Align2::RIGHT_CENTER, "AVG", FAINT);
         }
+        caps(painter, pos2(left + X_AVG, y), Align2::RIGHT_CENTER, "AVG", FAINT);
         caps(painter, pos2(left + X_BAR, y), Align2::LEFT_CENTER, "USAGE", FAINT);
 
         for component in self.visible(monitor) {
@@ -800,8 +796,8 @@ impl ThermalEye {
             painter.text(pos2(left + X_NOW, y), Align2::RIGHT_CENTER, self.temp(high.now), strong(14.0), tint(high.now));
             if !live {
                 painter.text(pos2(left + X_HIGH, y), Align2::RIGHT_CENTER, self.temp(high.high), strong(12.5), tint(high.high));
-                painter.text(pos2(left + X_AVG, y), Align2::RIGHT_CENTER, self.temp(avg), body(12.5), MUTED);
             }
+            painter.text(pos2(left + X_AVG, y), Align2::RIGHT_CENTER, self.temp(avg), body(12.5), MUTED);
 
             let bar = Rect::from_min_max(pos2(left + X_BAR, y - 8.0), pos2(rect.right() - PAD, y + 8.0));
             match component.usage.and_then(|id| monitor.stats(id, seconds).avg) {

@@ -518,11 +518,11 @@ fn a_shortened_sensor_name_also_shows_in_full() {
 }
 
 #[test]
-fn live_shows_one_temperature_column() {
+fn live_shows_now_and_avg_but_not_high() {
     let mut widget = Harness::new(Config { window_seconds: LIVE, ..Config::default() });
     widget.frame(Vec::new());
-    assert!(widget.shows("TEMP") && widget.shows("USAGE"));
-    assert!(!widget.shows("NOW") && !widget.shows("HIGH") && !widget.shows("AVG"));
+    assert!(widget.shows("NOW") && widget.shows("AVG") && widget.shows("USAGE"));
+    assert!(!widget.shows("HIGH") && !widget.shows("TEMP"));
 }
 
 #[test]
@@ -530,15 +530,14 @@ fn other_spans_keep_all_three_columns() {
     let mut widget = Harness::new(Config::default());
     widget.frame(Vec::new());
     assert!(widget.shows("NOW") && widget.shows("HIGH") && widget.shows("AVG"));
-    assert!(!widget.shows("TEMP"));
 }
 
 #[test]
 fn live_applies_to_the_compact_view_too() {
     let mut widget = Harness::new(Config { window_seconds: LIVE, compact: true, ..Config::default() });
     widget.frame(Vec::new());
-    assert!(widget.shows("TEMP"));
-    assert!(!widget.shows("HIGH") && !widget.shows("AVG"));
+    assert!(widget.shows("NOW") && widget.shows("AVG"));
+    assert!(!widget.shows("HIGH") && !widget.shows("TEMP"));
 }
 
 #[test]

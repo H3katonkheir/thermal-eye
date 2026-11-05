@@ -11,7 +11,6 @@ use eframe::egui::{
 
 use crate::bridge::Command;
 use crate::config::{self, Config};
-use crate::diagnostics;
 use crate::graph::{self, Line};
 use crate::history::Stats;
 use crate::logo;
@@ -616,153 +615,6 @@ impl ThermalEye {
         graph::draw(ui, rect, &lines, seconds, |c| Self::format_temp(fahrenheit, c));
     }
 
-    fn settings_height(&self) -> f32 {
-        SETTINGS_ROW_H * 7.0
-    }
-
-    fn settings_panel(&mut self, ui: &mut Ui, width: f32, monitor: &Monitor) {
-        let (rect, _) = ui.allocate_exact_size(vec2(width, self.settings_height()), Sense::hover());
-        ui.painter().rect_filled(rect, 0.0, NESTED_BG);
-        ui.painter().line_segment(
-            [pos2(rect.left(), rect.top()), pos2(rect.right(), rect.top())],
-            Stroke::new(1.0, BORDER),
-        );
-        let left = rect.left() + PAD + X_NAME;
-        let row = |index: f32| rect.top() + SETTINGS_ROW_H * (index + 0.5);
-        let label = |ui: &Ui, index: f32, text: &str| {
-            ui.painter().text(pos2(left, row(index)), Align2::LEFT_CENTER, text, body(12.5), MUTED);
-        };
-        let chip_rect = |x: f32, index: f32, chip: f32| Rect::from_min_size(pos2(x, row(index) - 11.0), vec2(chip, 22.0));
-        let start = left + 150.0;
-
-        label(ui, 0.0, "Temperature unit");
-        for (index, (text, fahrenheit)) in [("°C", false), ("°F", true)].into_iter().enumerate() {
-            let rect = chip_rect(start + index as f32 * 46.0, 0.0, 40.0);
-            let response = ui.interact(rect, ui.scope_id().with(("unit", text)), Sense::click());
-            chip_painter(ui.painter(), rect, text, self.config.fahrenheit == fahrenheit, response.hovered());
-            if response.clicked() {
-                self.config.fahrenheit = fahrenheit;
-            }
-        }
-
-        label(ui, 1.0, "Show components");
-        let mut x = start;
-        for component in &monitor.components {
-            let chip = 22.0 + component.title.len() as f32 * 7.0;
-            let rect = chip_rect(x, 1.0, chip);
-            let response = ui.interact(rect, ui.scope_id().with(("show", &component.key)), Sense::click());
-            let shown = !config::contains(&self.config.hidden, &component.key);
-            chip_painter(ui.painter(), rect, &component.title, shown, response.hovered());
-            if response.clicked() {
-                config::toggle(&mut self.config.hidden, &component.key);
-            }
-            x += chip + 6.0;
-        }
-
-        self.autostart_setting(ui, monitor, rect, start);
-
-        label(ui, 3.0, "Sensor access");
-        let status = match &monitor.link {
-            Link::Connected { elevated: true } if monitor.driver_missing => "Limited: PawnIO driver not installed",
-            Link::Connected { elevated: true } => "Full access",
-            Link::Connected { elevated: false } => "Limited: not running as administrator",
-            Link::Starting => "Starting",
-            Link::AwaitingConsent => "Waiting for permission",
-            Link::Lost(_) => "Disconnected",
-        };
-        ui.painter().text(pos2(start, row(3.0)), Align2::LEFT_CENTER, status, body(12.5), TEXT);
-
-        self.update_settings(ui, monitor, rect, start);
-        self.diagnostics_setting(ui, monitor, rect, start);
-    }
-
-    fn autostart_setting(&mut self, ui: &mut Ui, monitor: &Monitor, panel: Rect, start: f32) {
-        let y = panel.top() + SETTINGS_ROW_H * 2.5;
-        let left = panel.left() + PAD + X_NAME;
-        ui.painter().text(pos2(left, y), Align2::LEFT_CENTER, "Start with Windows", body(12.5), MUTED);
-
-        for (index, (text, enable)) in [("Off", false), ("On", true)].into_iter().enumerate() {
-            let rect = Rect::from_min_size(pos2(start + index as f32 * 46.0, y - 11.0), vec2(40.0, 22.0));
-            let response = ui.interact(rect, ui.scope_id().with(("autostart", text)), Sense::click());
-            chip_painter(ui.painter(), rect, text, monitor.autostart == enable, response.hovered());
-            if response.clicked() && monitor.autostart != enable {
-                let _ = self.commands.send(Command::SetAutostart(enable));
-            }
-        }
-    }
-
-    fn diagnostics_setting(&mut self, ui: &mut Ui, monitor: &Monitor, panel: Rect, start: f32) {
-        let y = panel.top() + SETTINGS_ROW_H * 6.5;
-        let left = panel.left() + PAD + X_NAME;
-        ui.painter().text(pos2(left, y), Align2::LEFT_CENTER, "Diagnostics", body(12.5), MUTED);
-
-        let button = Rect::from_min_size(pos2(start, y - 11.0), vec2(86.0, 22.0));
-        let response = ui.interact(button, ui.scope_id().with("diagnostics"), Sense::click());
-        chip_painter(ui.painter(), button, "Copy details", false, response.hovered());
-        if response.clicked() {
-            ui.ctx().copy_text(diagnostics::report(monitor));
-            self.copied_at = Some(Instant::now());
-            ui.ctx().request_repaint_after(COPIED_NOTE_TIME);
-        }
-
-        let copied = self.copied_at.is_some_and(|at| at.elapsed() < COPIED_NOTE_TIME);
-        let note = if copied { "Copied, ready to paste" } else { "Hardware and sensor details, for reporting a problem" };
-        let note_pos = pos2(button.right() + 10.0, y);
-        ui.painter().text(note_pos, Align2::LEFT_CENTER, note, body(11.0), FAINT);
-    }
-
-    fn update_settings(&mut self, ui: &mut Ui, monitor: &Monitor, panel: Rect, start: f32) {
-        let left = panel.left() + PAD + X_NAME;
-        let auto_y = panel.top() + SETTINGS_ROW_H * 4.5;
-        ui.painter().text(pos2(left, auto_y), Align2::LEFT_CENTER, "Check for updates", body(12.5), MUTED);
-        for (index, (text, enable)) in [("Off", false), ("On", true)].into_iter().enumerate() {
-            let rect = Rect::from_min_size(pos2(start + index as f32 * 46.0, auto_y - 11.0), vec2(40.0, 22.0));
-            let response = ui.interact(rect, ui.scope_id().with(("updates", text)), Sense::click());
-            chip_painter(ui.painter(), rect, text, self.config.check_updates == enable, response.hovered());
-            if response.clicked() && self.config.check_updates != enable {
-                self.config.check_updates = enable;
-                let _ = self.commands.send(Command::SetAutomaticUpdates(enable));
-            }
-        }
-
-        let y = panel.top() + SETTINGS_ROW_H * 5.5;
-        let version = format!("Version {}", update::CURRENT_VERSION);
-        ui.painter().text(pos2(left, y), Align2::LEFT_CENTER, version, body(12.5), MUTED);
-
-        let busy = matches!(
-            monitor.update,
-            UpdateState::Checking | UpdateState::Downloading(_) | UpdateState::Installing(_)
-        );
-        let (label, command) = match &monitor.update {
-            UpdateState::Ready(_) => ("Install", Command::InstallUpdate),
-            _ => ("Check now", Command::CheckForUpdate),
-        };
-        let button = Rect::from_min_size(pos2(start, y - 11.0), vec2(86.0, 22.0));
-        if !busy {
-            let response = ui.interact(button, ui.scope_id().with("check-update"), Sense::click());
-            chip_painter(ui.painter(), button, label, false, response.hovered());
-            if response.clicked() {
-                let _ = self.commands.send(command);
-            }
-        }
-
-        let status = match &monitor.update {
-            UpdateState::Idle => String::new(),
-            UpdateState::Checking => "Checking…".to_owned(),
-            UpdateState::UpToDate => "Up to date".to_owned(),
-            UpdateState::Downloading(version) => format!("Downloading {version}…"),
-            UpdateState::Ready(version) => format!("{version} is ready"),
-            UpdateState::Installing(version) => format!("Installing {version}…"),
-            UpdateState::Failed(reason) => elide(reason, 44),
-        };
-        let x = if busy { start } else { button.right() + 10.0 };
-        let shown = ui.painter().text(pos2(x, y), Align2::LEFT_CENTER, &status, body(11.5), FAINT);
-        if let UpdateState::Failed(reason) = &monitor.update {
-            let response = ui.interact(shown, ui.scope_id().with("update-failure"), Sense::hover());
-            show_full_text(ui, &response, shown, &status, reason);
-        }
-    }
-
     fn compact_table(&mut self, ui: &mut Ui, width: f32, monitor: &Monitor) {
         const X_NOW: f32 = 112.0;
         const X_HIGH: f32 = 150.0;
@@ -869,32 +721,7 @@ impl ThermalEye {
         let compact = self.config.compact;
         let width = if compact { COMPACT_WIDTH } else { WIDTH };
 
-        let notice: Option<(String, Option<(&str, Command)>)> = match &monitor.link {
-            Link::Connected { elevated: true } if monitor.driver_missing => {
-                let text = if compact { "Some sensors need PawnIO" } else { "CPU, RAM and board temperatures need the PawnIO driver" };
-                Some((text.into(), Some(("Get PawnIO", Command::OpenDriverPage))))
-            }
-            Link::Connected { elevated: true } if monitor.components.is_empty() => {
-                Some(("Reading sensors…".into(), None))
-            }
-            Link::Connected { elevated: true } => None,
-            Link::Connected { elevated: false } => {
-                let text = if compact { "Some sensors need admin access" } else { "CPU, RAM and board temperatures need admin access" };
-                Some((text.into(), Some(("Grant access", Command::Connect))))
-            }
-            Link::Starting => Some(("Starting sensors…".into(), None)),
-            Link::AwaitingConsent => Some(("Waiting for the Windows permission prompt…".into(), None)),
-            Link::Lost(reason) => Some((reason.clone(), Some(("Reconnect", Command::Connect)))),
-        };
-        let notice = notice.or_else(|| match &monitor.update {
-            UpdateState::Ready(version) => {
-                let text = if compact { format!("Update {version} ready") } else { format!("Version {version} is ready to install") };
-                Some((text, Some(("Install", Command::InstallUpdate))))
-            }
-            UpdateState::Installing(version) => Some((format!("Installing {version}…"), None)),
-            _ => None,
-        });
-
+        let notice = current_notice(&monitor, compact);
         let items = self.items(&monitor);
         let title_h = if compact { COMPACT_TITLE_H } else { TITLE_H };
         let show_updated = notice.is_none() && self.just_updated;
@@ -965,6 +792,38 @@ impl ThermalEye {
 
 }
 
+/// A message across the top of the window, and the button that deals with it.
+type Notice = (String, Option<(&'static str, Command)>);
+
+/// Sensor problems come first: an update can wait, missing readings cannot.
+/// The compact view is narrower, so it gets the short wording.
+fn current_notice(monitor: &Monitor, compact: bool) -> Option<Notice> {
+    let fit = |short: &str, long: &str| if compact { short } else { long }.to_owned();
+    let sensors = match &monitor.link {
+        Link::Connected { elevated: true } if monitor.driver_missing => Some((
+            fit("Some sensors need PawnIO", "CPU, RAM and board temperatures need the PawnIO driver"),
+            Some(("Get PawnIO", Command::OpenDriverPage)),
+        )),
+        Link::Connected { elevated: true } if monitor.components.is_empty() => Some(("Reading sensors…".into(), None)),
+        Link::Connected { elevated: true } => None,
+        Link::Connected { elevated: false } => Some((
+            fit("Some sensors need admin access", "CPU, RAM and board temperatures need admin access"),
+            Some(("Grant access", Command::Connect)),
+        )),
+        Link::Starting => Some(("Starting sensors…".into(), None)),
+        Link::AwaitingConsent => Some(("Waiting for the Windows permission prompt…".into(), None)),
+        Link::Lost(reason) => Some((reason.clone(), Some(("Reconnect", Command::Connect)))),
+    };
+    sensors.or_else(|| match &monitor.update {
+        UpdateState::Ready(version) => Some((
+            fit(&format!("Update {version} ready"), &format!("Version {version} is ready to install")),
+            Some(("Install", Command::InstallUpdate)),
+        )),
+        UpdateState::Installing(version) => Some((format!("Installing {version}…"), None)),
+        _ => None,
+    })
+}
+
 fn frequency(megahertz: Option<f32>) -> String {
     match megahertz {
         None => "—".into(),
@@ -1012,6 +871,9 @@ fn extra_values(monitor: &Monitor, component: &Component) -> Vec<(String, String
         })
         .collect()
 }
+
+#[path = "app_settings.rs"]
+mod settings;
 
 #[cfg(test)]
 #[path = "app_tests.rs"]

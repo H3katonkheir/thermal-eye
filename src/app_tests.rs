@@ -350,6 +350,45 @@ fn sensor_problems_outrank_the_update_notice() {
     assert!(matches!(widget.inbox.try_recv(), Ok(Command::Connect)));
 }
 
+fn bare_monitor(link: Link) -> Monitor {
+    let mut monitor = Monitor::new(Topology { cores: Vec::new(), l3: Vec::new() });
+    monitor.link = link;
+    monitor
+}
+
+#[test]
+fn notices_use_the_short_wording_in_the_compact_view() {
+    let mut monitor = bare_monitor(Link::Connected { elevated: false });
+    let text = |monitor: &Monitor, compact| current_notice(monitor, compact).map(|(text, _)| text);
+    assert_eq!(text(&monitor, true).as_deref(), Some("Some sensors need admin access"));
+    assert_eq!(text(&monitor, false).as_deref(), Some("CPU, RAM and board temperatures need admin access"));
+
+    monitor.link = Link::Connected { elevated: true };
+    monitor.ingest(SCHEMA);
+    monitor.link = Link::Connected { elevated: true };
+    monitor.update = UpdateState::Ready("9.9.9".into());
+    assert_eq!(text(&monitor, true).as_deref(), Some("Update 9.9.9 ready"));
+    assert_eq!(text(&monitor, false).as_deref(), Some("Version 9.9.9 is ready to install"));
+}
+
+#[test]
+fn a_healthy_link_says_it_is_reading_until_sensors_arrive() {
+    let mut monitor = bare_monitor(Link::Connected { elevated: true });
+    let notice = current_notice(&monitor, false);
+    assert!(matches!(notice, Some((ref text, None)) if text == "Reading sensors…"));
+
+    monitor.ingest(SCHEMA);
+    monitor.link = Link::Connected { elevated: true };
+    assert!(current_notice(&monitor, false).is_none());
+}
+
+#[test]
+fn a_lost_helper_shows_its_reason_and_offers_to_reconnect() {
+    let monitor = bare_monitor(Link::Lost("The helper stopped".into()));
+    let notice = current_notice(&monitor, true);
+    assert!(matches!(notice, Some((ref text, Some(("Reconnect", Command::Connect)))) if text == "The helper stopped"));
+}
+
 #[test]
 fn settings_can_check_for_updates_and_turn_checks_off() {
     let mut widget = Harness::new(Config::default());

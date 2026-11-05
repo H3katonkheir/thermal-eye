@@ -14,23 +14,24 @@
 </p>
 
 <p align="center">
-  <img src="assets/screenshot.png" width="600" alt="Thermal Eye showing temperatures and usage for each component, above a history graph">
+  <img src="assets/screenshot.png" width="654" alt="Thermal Eye showing temperatures and usage for each component, above a history graph">
 </p>
 
 ## What it does
 
 - **Every component in one place:** current, min, max and average temperature, plus
   average usage, for your CPU, graphics card, RAM, drives and motherboard.
-- **History graph:** choose what to plot, from whole components down to a single core
-  or sensor, over anything from the last minute to the last 24 hours.
+- **History graph:** use the dot at the end of a row to plot it, from whole components
+  down to a single core or sensor, over anything from the last minute to the last 24 hours.
 - **Every core:** open the CPU row to see each core's clock, low, peak, power and usage,
   grouped by die.
 - **Compact view:** a small window that stays out of the way, and can stay on top.
 - **Warnings at a glance:** readings turn amber or red as they near each part's limits.
+  Hover over a component's ring to see where those limits are.
 - **Updates itself:** one click to install a new version.
 
 <p align="center">
-  <img src="assets/screenshot-compact.png" width="336" alt="The compact view of Thermal Eye">
+  <img src="assets/screenshot-compact.png" width="374" alt="The compact view of Thermal Eye">
   &nbsp;&nbsp;
   <img src="assets/screenshot-cores.png" width="336" alt="The CPU row opened to show every core">
 </p>

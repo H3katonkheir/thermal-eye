@@ -131,6 +131,14 @@ fn storage_ignores_threshold_sensors_and_averages_drive_activity() {
 }
 
 #[test]
+fn a_problem_reported_by_the_helper_reaches_the_log() {
+    let mut monitor = monitor();
+    monitor.ingest(br#"{"t":"log","message":"IOException: driver went away"}"#);
+    assert!(crate::logfile::recent().iter().any(|line| line.ends_with("Helper: IOException: driver went away")));
+    assert!(monitor.components.len() == 5, "the stream carries on");
+}
+
+#[test]
 fn history_survives_the_sensor_list_being_announced_again() {
     let mut monitor = monitor();
     sample(&mut monitor, &[(CCD1, 40.0)]);

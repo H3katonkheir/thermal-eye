@@ -1,7 +1,8 @@
 //! The notification area icon, which shows the hottest reading as a number.
 //!
 //! It runs on its own thread with its own window, so it keeps updating while the
-//! widget is minimised and egui is not drawing.
+//! widget is minimised and egui is not drawing. It also keeps the widget off the
+//! taskbar when asked, as only the icon can bring a window without a button back.
 
 use std::cell::RefCell;
 use std::sync::mpsc::channel;
@@ -16,14 +17,16 @@ use windows::Win32::Graphics::Gdi::{
     CreateCompatibleDC, CreateDIBSection, CreateFontW, DEFAULT_CHARSET, DIB_RGB_COLORS, DeleteDC, DeleteObject,
     FW_BOLD, GdiFlush, HBITMAP, OUT_TT_PRECIS, SelectObject, SetBkMode, SetTextColor, TRANSPARENT, TextOutW,
 };
+use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::{
-    NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW, Shell_NotifyIconW,
+    ITaskbarList, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW, Shell_NotifyIconW,
+    TaskbarList,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreateIconIndirect, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyMenu,
     DestroyWindow, DispatchMessageW, GetCursorPos, GetMessageW, GetSystemMetrics, HICON, ICONINFO, IMAGE_ICON,
-    IsIconic, LR_DEFAULTCOLOR, LoadImageW, MF_SEPARATOR, MF_STRING, MSG, PostMessageW, PostQuitMessage,
+    IsIconic, IsWindowVisible, LR_DEFAULTCOLOR, LoadImageW, MF_SEPARATOR, MF_STRING, MSG, PostMessageW, PostQuitMessage,
     RegisterClassW, RegisterWindowMessageW, SM_CXSMICON, SW_HIDE, SW_RESTORE, SW_SHOW, SendMessageW, SetForegroundWindow,
     SetTimer, ShowWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WM_APP, WM_CLOSE,
     WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
@@ -59,11 +62,17 @@ struct Settings {
     enabled: bool,
     fahrenheit: bool,
     hidden: Vec<String>,
+    hide_taskbar_button: bool,
 }
 
 impl Settings {
     fn of(config: &Config) -> Self {
-        Self { enabled: config.tray_icon, fahrenheit: config.fahrenheit, hidden: config.hidden.clone() }
+        Self {
+            enabled: config.tray_icon,
+            fahrenheit: config.fahrenheit,
+            hidden: config.hidden.clone(),
+            hide_taskbar_button: config.hide_taskbar_button,
+        }
     }
 }
 
@@ -85,6 +94,8 @@ impl Tray {
         let shown_flag = icon_shown.clone();
         let (ready, started) = channel();
         let spawned = std::thread::Builder::new().name("tray".into()).spawn(move || {
+            // For the taskbar list, which is a COM object.
+            let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
             let Some(window) = create_window() else {
                 let _ = ready.send(None);
                 return;
@@ -98,6 +109,8 @@ impl Tray {
                     icon_shown: shown_flag,
                     icon: None,
                     shown: None,
+                    taskbar: None,
+                    button_hidden: None,
                 })
             });
             let _ = ready.send(Some(window.0 as isize));
@@ -205,10 +218,19 @@ struct State {
     /// What the shell is showing, or `None` while there is no icon.
     shown: Option<Reading>,
     icon_shown: Arc<AtomicBool>,
+    taskbar: Option<ITaskbarList>,
+    /// Whether the widget's taskbar button was last hidden or put back, or `None` when
+    /// that may no longer hold: showing a window can bring its button back.
+    button_hidden: Option<bool>,
 }
 
 impl State {
     fn refresh(&mut self) {
+        self.refresh_icon();
+        self.sync_taskbar_button();
+    }
+
+    fn refresh_icon(&mut self) {
         let settings = self.settings.lock().unwrap().clone();
         if !settings.enabled {
             self.remove();
@@ -247,6 +269,30 @@ impl State {
             self.shown = None;
         }
         self.icon_shown.store(self.shown.is_some(), Ordering::Relaxed);
+    }
+
+    /// Hides the widget's taskbar button while set to and the icon is there to bring
+    /// the widget back, and puts it back otherwise.
+    fn sync_taskbar_button(&mut self) {
+        let Some(main) = self.main_window else { return };
+        if !unsafe { IsWindowVisible(main) }.as_bool() {
+            self.button_hidden = None;
+            return;
+        }
+        let hide = self.settings.lock().unwrap().hide_taskbar_button && self.shown.is_some();
+        if self.button_hidden == Some(hide) {
+            return;
+        }
+        if self.taskbar.is_none() {
+            self.taskbar = unsafe { CoCreateInstance::<_, ITaskbarList>(&TaskbarList, None, CLSCTX_INPROC_SERVER) }
+                .ok()
+                .filter(|list| unsafe { list.HrInit() }.is_ok());
+        }
+        let Some(list) = &self.taskbar else { return };
+        let done = unsafe { if hide { list.DeleteTab(main) } else { list.AddTab(main) } };
+        if done.is_ok() {
+            self.button_hidden = Some(hide);
+        }
     }
 
     fn data(&self) -> NOTIFYICONDATAW {
@@ -333,7 +379,10 @@ unsafe extern "system" fn window_proc(window: HWND, message: u32, wparam: WPARAM
         _ if message == taskbar_created() => with_state(|state| {
             state.shown = None;
             state.icon_shown.store(false, Ordering::Relaxed);
-            state.refresh();
+            // The widget's window hears this too and puts its button back as it was at
+            // launch, so set it again at the next tick, once that has happened.
+            state.button_hidden = None;
+            state.refresh_icon();
         }),
         _ => return unsafe { DefWindowProcW(window, message, wparam, lparam) },
     }
@@ -350,6 +399,7 @@ fn open_main_window() {
         let _ = ShowWindow(main, if IsIconic(main).as_bool() { SW_RESTORE } else { SW_SHOW });
         let _ = SetForegroundWindow(main);
     }
+    with_state(State::sync_taskbar_button);
 }
 
 fn show_menu(window: HWND) {

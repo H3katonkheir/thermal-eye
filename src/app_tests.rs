@@ -363,6 +363,21 @@ fn close_to_tray_is_set_in_settings_and_never_strands_the_window() {
 }
 
 #[test]
+fn the_taskbar_button_is_hidden_by_default_and_can_be_kept() {
+    let mut widget = Harness::new(Config::default());
+    assert!(widget.app.config.hide_taskbar_button, "on by default");
+    widget.click(full_button(6));
+    let top = widget.height() - BOTTOM_PAD - widget.app.settings_height();
+    let (y, left) = (top + row_middle(settings::TASKBAR_ROW), PAD + X_NAME + 150.0);
+    assert!(widget.shows("Open it from the tray icon instead"));
+
+    widget.click((left + 20.0, y));
+    assert!(!widget.app.config.hide_taskbar_button);
+    widget.click((left + 46.0 + 20.0, y));
+    assert!(widget.app.config.hide_taskbar_button);
+}
+
+#[test]
 fn start_with_windows_asks_only_when_the_setting_changes() {
     let mut widget = Harness::new(Config::default());
     widget.click(full_button(6));

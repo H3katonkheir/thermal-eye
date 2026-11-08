@@ -54,6 +54,8 @@ pub struct Config {
     pub tray_icon: bool,
     /// The close button hides the widget, which keeps running behind the tray icon.
     pub close_to_tray: bool,
+    /// Keep the open widget off the taskbar, leaving the tray icon as its button.
+    pub hide_taskbar_button: bool,
     /// Look for new versions at launch and once a day.
     pub check_updates: bool,
     /// The version last run, so the first run after an update can say so.
@@ -77,6 +79,7 @@ impl Default for Config {
             hidden: Vec::new(),
             tray_icon: true,
             close_to_tray: false,
+            hide_taskbar_button: true,
             check_updates: true,
             seen_version: None,
             position: None,

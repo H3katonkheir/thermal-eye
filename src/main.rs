@@ -55,6 +55,11 @@ fn main() -> eframe::Result {
     if config.always_on_top {
         viewport = viewport.with_always_on_top();
     }
+    // Hidden before the window first shows, so the button never flashes up. The tray
+    // thread puts it back if the icon cannot be added, and keeps it in step later.
+    if config.hide_taskbar_button && config.tray_icon {
+        viewport = viewport.with_taskbar(false);
+    }
     let check_updates = config.check_updates;
     let position = config.position.filter(|p| window::is_on_screen(*p));
 

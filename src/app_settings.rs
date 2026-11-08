@@ -19,11 +19,12 @@ pub(super) const COMPONENTS_ROW: usize = 2;
 pub(super) const COLUMNS_ROW: usize = 3;
 pub(super) const AUTOSTART_ROW: usize = 4;
 pub(super) const TRAY_ROW: usize = 5;
-pub(super) const CLOSE_ROW: usize = 6;
-pub(super) const UPDATES_ROW: usize = 7;
-pub(super) const VERSION_ROW: usize = 8;
-pub(super) const DIAGNOSTICS_ROW: usize = 9;
-const ROWS: usize = 10;
+pub(super) const TASKBAR_ROW: usize = 6;
+pub(super) const CLOSE_ROW: usize = 7;
+pub(super) const UPDATES_ROW: usize = 8;
+pub(super) const VERSION_ROW: usize = 9;
+pub(super) const DIAGNOSTICS_ROW: usize = 10;
+const ROWS: usize = 11;
 /// Distance from the labels to the controls.
 const CONTROLS_X: f32 = 150.0;
 const OFF_ON: [(&str, bool); 2] = [("Off", false), ("On", true)];
@@ -149,6 +150,15 @@ impl ThermalEye {
         // New icons start out in the overflow, so say where to look.
         let note = pos2(layout.start + 2.0 * 46.0 + 4.0, layout.y(TRAY_ROW));
         ui.painter().text(note, Align2::LEFT_CENTER, "Windows may hide it under ^ at first", body(11.0), FAINT);
+
+        layout.label(ui, TASKBAR_ROW, "Hide taskbar button");
+        let current = self.config.hide_taskbar_button;
+        if let Some(enable) = layout.choice(ui, TASKBAR_ROW, "hide-taskbar", OFF_ON, current) {
+            self.config.hide_taskbar_button = enable;
+        }
+        let note = if self.config.tray_icon { "Open it from the tray icon instead" } else { "Needs the temperature in tray" };
+        let note_pos = pos2(layout.start + 2.0 * 46.0 + 4.0, layout.y(TASKBAR_ROW));
+        ui.painter().text(note_pos, Align2::LEFT_CENTER, note, body(11.0), FAINT);
 
         layout.label(ui, CLOSE_ROW, "Close to tray");
         if let Some(enable) = layout.choice(ui, CLOSE_ROW, "close-to-tray", OFF_ON, self.config.close_to_tray) {

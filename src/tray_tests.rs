@@ -7,7 +7,7 @@ const GPU_HOT_SPOT: &str = "/gpu-amd/5/temperature/7";
 const DRIVE: &str = "/nvme/3/temperature/0";
 
 fn settings() -> Settings {
-    Settings { enabled: true, fahrenheit: false, hidden: Vec::new() }
+    Settings { enabled: true, fahrenheit: false, hidden: Vec::new(), hide_taskbar_button: true }
 }
 
 /// A monitor that has had one sample, with only the given sensors reading.

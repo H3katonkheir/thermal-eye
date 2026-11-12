@@ -12,9 +12,14 @@ use crate::topology::{L3Domain, Topology};
 
 const SCHEMA: &[u8] = include_bytes!("../tests/fixtures/schema.json");
 
-/// Window widths with every column shown, as the default settings have.
-const WIDTH: f32 = 654.0;
-const COMPACT_WIDTH: f32 = 374.0;
+/// Window widths with the default columns: AVG, HOT and MAX.
+const WIDTH: f32 = 602.0;
+const COMPACT_WIDTH: f32 = 336.0;
+
+/// Which of HOT, MAX, COOL and MIN to show.
+fn shown(hot: bool, max: bool, cool: bool, min: bool) -> config::Columns {
+    config::Columns { hot, max, cool, min }
+}
 
 /// Where the graph dots sit with the default columns.
 fn dot_x() -> f32 {
@@ -628,7 +633,7 @@ fn hovering_shortened_text_shows_all_of_it() {
 #[test]
 fn the_tooltip_only_appears_over_the_text_itself() {
     let mut widget = Harness::new(Config::default());
-    widget.hover((PAD + X_NOW, row_y(2)));
+    widget.hover((PAD + X_AVG, row_y(2)));
     assert!(!widget.shows(RAM_SUBTITLE));
 }
 
@@ -652,26 +657,35 @@ fn a_shortened_sensor_name_also_shows_in_full() {
 }
 
 #[test]
-fn live_shows_now_and_avg_but_not_min_or_max() {
-    let mut widget = Harness::new(Config { window_seconds: LIVE, ..Config::default() });
+fn live_keeps_the_current_readings_but_not_max_or_min() {
+    let mut widget = Harness::new(Config { window_seconds: LIVE, columns: shown(true, true, true, true), ..Config::default() });
     widget.frame(Vec::new());
-    assert!(widget.shows("NOW") && widget.shows("AVG") && widget.shows("USAGE"));
-    assert!(!widget.shows("MIN") && !widget.shows("MAX") && !widget.shows("TEMP"));
+    assert!(widget.shows("AVG") && widget.shows("HOT") && widget.shows("COOL") && widget.shows("USAGE"));
+    assert!(!widget.shows("MAX") && !widget.shows("MIN"));
 }
 
 #[test]
-fn other_spans_keep_all_four_columns() {
+fn other_spans_show_every_column_turned_on() {
+    let mut widget = Harness::new(Config { columns: shown(true, true, true, true), ..Config::default() });
+    widget.frame(Vec::new());
+    assert!(["AVG", "HOT", "MAX", "COOL", "MIN"].iter().all(|head| widget.shows(head)));
+}
+
+#[test]
+fn the_defaults_show_avg_hot_and_max() {
     let mut widget = Harness::new(Config::default());
     widget.frame(Vec::new());
-    assert!(widget.shows("NOW") && widget.shows("MIN") && widget.shows("MAX") && widget.shows("AVG"));
+    assert!(widget.shows("AVG") && widget.shows("HOT") && widget.shows("MAX"));
+    assert!(!widget.shows("COOL") && !widget.shows("MIN"));
 }
 
 #[test]
 fn live_applies_to_the_compact_view_too() {
-    let mut widget = Harness::new(Config { window_seconds: LIVE, compact: true, ..Config::default() });
+    let columns = shown(true, true, true, true);
+    let mut widget = Harness::new(Config { window_seconds: LIVE, compact: true, columns, ..Config::default() });
     widget.frame(Vec::new());
-    assert!(widget.shows("NOW") && widget.shows("AVG"));
-    assert!(!widget.shows("MIN") && !widget.shows("MAX") && !widget.shows("TEMP"));
+    assert!(widget.shows("AVG") && widget.shows("HOT") && widget.shows("COOL"));
+    assert!(!widget.shows("MAX") && !widget.shows("MIN"));
 }
 
 #[test]
@@ -753,85 +767,108 @@ fn the_default_widths_show_every_column() {
 }
 
 #[test]
-fn min_shows_how_low_the_hottest_sensor_got() {
-    let widget = Harness::new(Config::default());
-    let mut monitor = widget.monitor.lock().unwrap();
-    let cpu = monitor.components[0].high;
-    for value in [52.0, 38.0, 61.0] {
-        monitor.history.set(cpu, value);
-        monitor.history.commit();
-    }
-    let stats = monitor.stats(cpu, 300);
-    assert_eq!((stats.low, stats.high, stats.now), (Some(38.0), Some(61.0), Some(61.0)));
+fn the_core_dropdown_follows_the_columns() {
+    let config = Config { expanded: vec!["cpu".into()], columns: shown(true, true, false, true), ..Config::default() };
+    let mut widget = Harness::new(config);
+    widget.frame(Vec::new());
+    assert!(widget.shows("CLOCK") && widget.shows("PEAK") && widget.shows("LOW") && widget.shows("POWER"));
+
+    let config = Config { expanded: vec!["cpu".into()], columns: shown(true, false, false, false), ..Config::default() };
+    let mut widget = Harness::new(config);
+    widget.frame(Vec::new());
+    assert!(!widget.shows("PEAK") && !widget.shows("LOW"));
 }
 
 #[test]
-fn the_core_dropdown_shows_the_lowest_clock_under_min() {
-    let mut widget = Harness::new(Config { expanded: vec!["cpu".into()], ..Config::default() });
+fn core_power_moves_to_cool_when_hot_is_hidden() {
+    let config = Config { expanded: vec!["cpu".into()], columns: shown(false, false, true, false), ..Config::default() };
+    let mut widget = Harness::new(config);
     widget.frame(Vec::new());
-    assert!(widget.shows("CLOCK") && widget.shows("LOW") && widget.shows("PEAK") && widget.shows("POWER"));
+    assert!(widget.shows("POWER"));
 }
 
-/// Clicks the Min or Max chip in the settings panel.
+/// Clicks the Hot, Max, Cool or Min chip in the settings panel.
 fn toggle_column(widget: &mut Harness, index: usize) {
     let top = widget.height() - BOTTOM_PAD - widget.app.settings_height();
     widget.click((PAD + X_NAME + 150.0 + index as f32 * 46.0 + 20.0, top + row_middle(settings::COLUMNS_ROW)));
 }
 
 #[test]
-fn hiding_min_and_max_narrows_the_window() {
+fn toggling_columns_resizes_the_window() {
     let mut widget = Harness::new(Config::default());
     widget.click(full_button(6));
     assert_eq!(widget.width(), WIDTH);
 
     toggle_column(&mut widget, 0);
-    assert!(!widget.app.config.columns.min);
+    assert!(!widget.app.config.columns.hot);
     assert_eq!(widget.width(), WIDTH - TEMP_STEP);
 
     toggle_column(&mut widget, 1);
     assert!(!widget.app.config.columns.max);
-    assert_eq!(widget.width(), WIDTH - 2.0 * TEMP_STEP);
+    assert_eq!(widget.width(), WIDTH - TEMP_STEP, "room for one column is kept");
 
-    toggle_column(&mut widget, 0);
-    assert_eq!(widget.width(), WIDTH - TEMP_STEP);
+    toggle_column(&mut widget, 2);
+    toggle_column(&mut widget, 3);
+    assert!(widget.app.config.columns.cool && widget.app.config.columns.min);
+    assert_eq!(widget.width(), WIDTH);
 
     // Settings cover the table, so the headings show once they close.
     let width = widget.width();
     widget.click(button(6, 30.0, width, TITLE_H));
-    assert!(widget.shows("MIN") && !widget.shows("MAX"));
+    assert!(widget.shows("COOL") && widget.shows("MIN") && !widget.shows("HOT") && !widget.shows("MAX"));
+}
+
+#[test]
+fn column_chips_explain_themselves() {
+    let mut widget = Harness::new(Config::default());
+    widget.app.settings_open = true;
+    widget.frame(Vec::new());
+    let top = widget.height() - BOTTOM_PAD - widget.app.settings_height();
+    widget.hover((PAD + X_NAME + 150.0 + 46.0 + 20.0, top + row_middle(settings::COLUMNS_ROW)));
+    assert!(widget.drawn.iter().any(|(text, _)| text.starts_with("MAX: hottest any sensor") && text.contains("Live")));
 }
 
 #[test]
 fn hidden_columns_also_narrow_the_compact_view() {
-    let columns = |min, max| config::Columns { min, max };
     let width = |columns| window_width(&Config { compact: true, columns, ..Config::default() });
-    assert_eq!(width(columns(false, true)), COMPACT_WIDTH - COMPACT_STEP);
-    assert_eq!(width(columns(true, false)), COMPACT_WIDTH - COMPACT_STEP);
-    assert_eq!(width(columns(false, false)), COMPACT_WIDTH - 2.0 * COMPACT_STEP);
+    assert_eq!(width(shown(false, true, false, false)), COMPACT_WIDTH - COMPACT_STEP);
+    assert_eq!(width(shown(true, false, false, false)), COMPACT_WIDTH - COMPACT_STEP);
+    assert_eq!(width(shown(false, false, false, false)), COMPACT_WIDTH - COMPACT_STEP, "keeps room for one column");
+    assert_eq!(width(shown(true, true, true, true)), COMPACT_WIDTH + 2.0 * COMPACT_STEP);
 
-    let mut widget = Harness::new(Config { compact: true, columns: columns(false, true), ..Config::default() });
+    let mut widget = Harness::new(Config { compact: true, columns: shown(false, true, false, false), ..Config::default() });
     assert_eq!(widget.width(), COMPACT_WIDTH - COMPACT_STEP);
     widget.frame(Vec::new());
-    assert!(!widget.shows("MIN") && widget.shows("MAX"));
+    assert!(!widget.shows("HOT") && widget.shows("MAX"));
 }
 
 #[test]
-fn live_takes_no_room_for_min_and_max() {
-    let hidden = config::Columns { min: false, max: false };
+fn live_takes_no_room_for_max_and_min() {
     for compact in [false, true] {
-        let live = Config { compact, window_seconds: LIVE, ..Config::default() };
-        let narrow = Config { compact, columns: hidden.clone(), ..Config::default() };
+        let live = Config { compact, window_seconds: LIVE, columns: shown(true, true, true, true), ..Config::default() };
+        let narrow = Config { compact, columns: shown(true, false, true, false), ..Config::default() };
         assert_eq!(window_width(&live), window_width(&narrow));
     }
 }
 
 #[test]
 fn the_column_help_lists_only_the_columns_shown() {
-    let config = Config { columns: config::Columns { min: false, max: true }, ..Config::default() };
+    let config = Config { columns: shown(false, true, true, false), ..Config::default() };
     let widget = Harness::new(config);
     let help = widget.app.column_help(&widget.app.columns());
-    assert!(help.contains("MAX:") && !help.contains("MIN:"));
+    assert!(help.contains("AVG:") && help.contains("MAX:") && help.contains("COOL:"));
+    assert!(!help.contains("HOT:") && !help.contains("MIN:"));
 }
+
+#[test]
+fn old_column_choices_are_not_read_with_their_new_meaning() {
+    let old: Config = serde_json::from_str(r#"{"columns":{"min":true,"max":false}}"#).unwrap();
+    assert_eq!(old.columns, config::Columns::default());
+}
+
+/// Column choices worth laying out: all, the defaults, none, and the coolest only.
+const COLUMN_SETS: [(bool, bool, bool, bool); 4] =
+    [(true, true, true, true), (true, true, false, false), (false, false, false, false), (false, false, true, true)];
 
 /// Every text drawn fits the window and none overlaps another.
 fn assert_tidy(widget: &Harness, case: &str) {
@@ -865,13 +902,13 @@ fn every_layout_fits_its_text() {
         }),
     ];
     for compact in [false, true] {
-        for (min, max) in [(true, true), (true, false), (false, true), (false, false)] {
+        for (hot, max, cool, min) in COLUMN_SETS {
             for window_seconds in [LIVE, 300] {
                 for (notice, set_up) in notices {
                     for seen in [None, Some("0.0.1")] {
                         let config = Config {
                             compact,
-                            columns: config::Columns { min, max },
+                            columns: shown(hot, max, cool, min),
                             window_seconds,
                             expanded: vec!["cpu".into(), "system".into()],
                             seen_version: seen.map(str::to_owned),
@@ -886,7 +923,7 @@ fn every_layout_fits_its_text() {
                             widget.frame(Vec::new());
                             widget.frame(Vec::new());
                             let case = format!(
-                                "compact {compact}, settings {settings}, min {min}, max {max}, {window_seconds}s, {notice}, seen {seen:?}"
+                                "compact {compact}, settings {settings}, columns {hot} {max} {cool} {min}, {window_seconds}s, {notice}, seen {seen:?}"
                             );
                             assert_tidy(&widget, &case);
                         }
@@ -899,14 +936,14 @@ fn every_layout_fits_its_text() {
 
 #[test]
 fn the_compact_title_clears_the_buttons_at_every_width() {
-    for (min, max) in [(true, true), (true, false), (false, false)] {
-        let config = Config { compact: true, columns: config::Columns { min, max }, ..Config::default() };
+    for (hot, max, cool, min) in COLUMN_SETS {
+        let config = Config { compact: true, columns: shown(hot, max, cool, min), ..Config::default() };
         let mut widget = Harness::new(config);
         widget.frame(Vec::new());
         let title = widget.drawn.iter().find(|(text, _)| text == "Thermal Eye").unwrap().1;
         let (side, gap, buttons) = (26.0, 6.0, 4.0);
         let first_button = widget.width() - PAD - buttons * side - (buttons - 1.0) * gap;
-        assert!(title.right() + gap <= first_button, "min {min}, max {max}: the title runs under the buttons");
+        assert!(title.right() + gap <= first_button, "columns {hot} {max} {cool} {min}: the title runs under the buttons");
     }
 }
 
@@ -940,7 +977,7 @@ fn ring_levels_follow_the_temperature_unit() {
 #[test]
 fn the_ring_tooltip_only_appears_over_the_ring() {
     let mut widget = Harness::new(Config::default());
-    widget.hover((PAD + X_NOW + 30.0, row_y(0)));
+    widget.hover((PAD + X_AVG + 30.0, row_y(0)));
     assert!(!widget.drawn.iter().any(|(text, _)| text.starts_with("Warning from")));
 }
 
@@ -966,7 +1003,7 @@ fn settings_take_over_the_window_until_done() {
     let mut widget = Harness::new(Config { graph_open: true, ..Config::default() });
     widget.click(full_button(6));
     assert!(widget.shows("SETTINGS") && widget.shows("Temperature unit"));
-    assert!(!widget.shows("NOW") && !widget.shows("Ryzen 9 9950X3D"), "the table is covered");
+    assert!(!widget.shows("AVG") && !widget.shows("Ryzen 9 9950X3D"), "the table is covered");
     assert!(!widget.shows("Average"), "and so is the graph");
     let banner = if widget.shows("Starting sensors…") { BANNER_H } else { 0.0 };
     let expected = TITLE_H + banner + HEADER_H + widget.app.settings_height() + BOTTOM_PAD;
@@ -975,7 +1012,24 @@ fn settings_take_over_the_window_until_done() {
     let done = (widget.width() - PAD - 32.0, TITLE_H + banner + HEADER_H / 2.0);
     widget.click(done);
     assert!(!widget.app.settings_open);
-    assert!(widget.shows("NOW") && widget.shows("Ryzen 9 9950X3D") && widget.shows("Average"));
+    assert!(widget.shows("AVG") && widget.shows("Ryzen 9 9950X3D") && widget.shows("Average"));
+}
+
+#[test]
+fn the_graph_key_names_only_the_lines_shown() {
+    let key = |config: Config| {
+        let mut widget = Harness::new(Config { graph_open: true, ..config });
+        widget.frame(Vec::new());
+        widget.drawn.iter().find(|(text, _)| text.contains("Solid") || text.contains("Faded") || text.contains("Dashed")).map(|(text, _)| text.clone())
+    };
+    assert_eq!(key(Config::default()).as_deref(), Some("Solid: high    Dashed: usage"));
+
+    let all = config::Metrics { high: true, avg: true, usage: true };
+    assert_eq!(key(Config { metrics: all.clone(), ..Config::default() }).as_deref(), Some("Solid: high    Faded: average    Dashed: usage"));
+
+    let avg_only = config::Metrics { high: false, avg: true, usage: false };
+    assert_eq!(key(Config { metrics: avg_only, ..Config::default() }), None, "one kind of line needs no key");
+    assert_eq!(key(Config { metrics: all, graphed: Vec::new(), ..Config::default() }), None, "nothing graphed, no key");
 }
 
 #[test]
@@ -984,7 +1038,7 @@ fn the_settings_button_also_closes_them() {
     widget.click(full_button(6));
     widget.click(full_button(6));
     assert!(!widget.app.settings_open);
-    assert!(widget.shows("NOW"));
+    assert!(widget.shows("AVG"));
 }
 
 #[test]
@@ -994,7 +1048,7 @@ fn switching_to_compact_leaves_settings() {
     widget.click(full_button(2));
     assert!(widget.app.config.compact && !widget.app.settings_open);
     widget.click(button(2, 26.0, widget.width(), COMPACT_TITLE_H));
-    assert!(widget.shows("NOW"), "back to the table, not the settings");
+    assert!(widget.shows("AVG"), "back to the table, not the settings");
 }
 
 const GRAPH_TIP: &str = "Click the dot at the end of a row to add it to the graph, and again to take it off.";

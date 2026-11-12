@@ -4,7 +4,10 @@ use std::time::Instant;
 
 use eframe::egui::{Align2, Rect, Sense, Stroke, Ui, pos2, vec2};
 
-use super::{COPIED_NOTE_TIME, HEADER_H, PAD, SETTINGS_ROW_H, ThermalEye, X_NAME, elide, is_live, show_full_text};
+use super::{
+    COPIED_NOTE_TIME, COOL_HELP, HEADER_H, HOT_HELP, MAX_HELP, MIN_HELP, PAD, SETTINGS_ROW_H, ThermalEye, X_NAME, elide, is_live,
+    show_full_text,
+};
 use crate::bridge::Command;
 use crate::config;
 use crate::diagnostics;
@@ -122,20 +125,32 @@ impl ThermalEye {
         }
 
         layout.label(ui, COLUMNS_ROW, "Show columns");
+        let live = is_live(&self.config);
         let columns = &mut self.config.columns;
+        let chips = [
+            ("Hot", &mut columns.hot, HOT_HELP, false),
+            ("Max", &mut columns.max, MAX_HELP, true),
+            ("Cool", &mut columns.cool, COOL_HELP, false),
+            ("Min", &mut columns.min, MIN_HELP, true),
+        ];
         let mut x = layout.start;
-        for (text, shown) in [("Min", &mut columns.min), ("Max", &mut columns.max)] {
+        for (text, shown, help, needs_span) in chips {
             let rect = layout.chip(x, COLUMNS_ROW, 40.0);
-            let response = ui.interact(rect, ui.scope_id().with(("column", text)), Sense::click());
+            let mut tip = format!("{}: {help}", text.to_uppercase());
+            if needs_span {
+                tip.push_str("\nHidden in Live, where it would repeat ");
+                tip.push_str(if text == "Max" { "HOT" } else { "COOL" });
+            }
+            let response = ui.interact(rect, ui.scope_id().with(("column", text)), Sense::click()).on_hover_text(tip);
             chip_painter(ui.painter(), rect, text, *shown, response.hovered());
             if response.clicked() {
                 *shown = !*shown;
             }
             x += 46.0;
         }
-        if is_live(&self.config) {
+        if live {
             let note = pos2(x + 4.0, layout.y(COLUMNS_ROW));
-            ui.painter().text(note, Align2::LEFT_CENTER, "Not used in Live", body(11.0), FAINT);
+            ui.painter().text(note, Align2::LEFT_CENTER, "Live hides Max, Min", body(11.0), FAINT);
         }
 
         layout.label(ui, AUTOSTART_ROW, "Start with Windows");

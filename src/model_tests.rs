@@ -83,6 +83,7 @@ fn tctl_raises_the_cpu_high_but_is_not_averaged_with_the_dies() {
     let cpu = component(&monitor, "cpu");
     assert_eq!(monitor.latest(cpu.high), Some(70.0));
     assert_eq!(monitor.latest(cpu.avg), Some(45.0));
+    assert_eq!(monitor.latest(cpu.low), Some(40.0));
 }
 
 #[test]

@@ -45,17 +45,16 @@ const BOTTOM_PAD: f32 = 10.0;
 const SCREEN_MARGIN: f32 = 90.0;
 
 // Column anchors, measured from the left edge of the content. The columns after
-// NOW depend on which are shown; see `Columns`.
+// AVG depend on which are shown; see `Columns`.
 const X_NAME: f32 = 20.0;
 const X_RING: f32 = 204.0;
-const X_NOW: f32 = 256.0;
+const X_AVG: f32 = 256.0;
 const RING_RADIUS: f32 = 9.0;
 /// Where names and subtitles must end, leaving a clear gap before the ring.
 const NAME_END: f32 = X_RING - RING_RADIUS - 15.0;
 /// Distance between the right edges of neighbouring temperature columns.
 const TEMP_STEP: f32 = 54.0;
-const AVG_STEP: f32 = 52.0;
-const COMPACT_X_NOW: f32 = 112.0;
+const COMPACT_X_AVG: f32 = 112.0;
 const COMPACT_STEP: f32 = 38.0;
 const COMPACT_BAR_GAP: f32 = 12.0;
 const COMPACT_BAR_W: f32 = 108.0;
@@ -72,35 +71,53 @@ const WINDOWS: [(&str, u32, f32); 7] = [
 const MIN_GRAPH_SECONDS: u32 = 60;
 const COPIED_NOTE_TIME: Duration = Duration::from_secs(3);
 
-/// Where the temperature columns sit, from the left edge of the content. MIN and
-/// MAX take no room while hidden, and the window narrows to match.
+// What each temperature column means, for the header tooltip and the settings chips.
+const AVG_HELP: &str = "mean of the component's sensors right now";
+const HOT_HELP: &str = "hottest sensor right now";
+const MAX_HELP: &str = "hottest any sensor got in the selected span";
+const COOL_HELP: &str = "coolest sensor right now";
+const MIN_HELP: &str = "coolest any sensor got in the selected span";
+
+/// Where the temperature columns sit, from the left edge of the content. AVG
+/// always shows; the others take no room while hidden, and the window narrows to match.
 struct Columns {
-    now: f32,
-    min: Option<f32>,
-    max: Option<f32>,
     avg: f32,
+    hot: Option<f32>,
+    max: Option<f32>,
+    cool: Option<f32>,
+    min: Option<f32>,
+    /// Right edge of the last column shown.
+    last: f32,
 }
 
 impl Columns {
     fn new(config: &Config) -> Self {
-        let (now, step, avg_step) =
-            if config.compact { (COMPACT_X_NOW, COMPACT_STEP, COMPACT_STEP) } else { (X_NOW, TEMP_STEP, AVG_STEP) };
-        // In Live there is no span, so MIN and MAX would just repeat the reading.
+        let (avg, step) = if config.compact { (COMPACT_X_AVG, COMPACT_STEP) } else { (X_AVG, TEMP_STEP) };
+        // In Live there is no span, so MAX and MIN would just repeat HOT and COOL.
         let span = !is_live(config);
-        let mut x = now;
+        let shown = &config.columns;
+        let mut x = avg;
         let mut next = |shown: bool| {
             shown.then(|| {
                 x += step;
                 x
             })
         };
-        let min = next(span && config.columns.min);
-        let max = next(span && config.columns.max);
-        Self { now, min, max, avg: x + avg_step }
+        let hot = next(shown.hot);
+        let max = next(span && shown.max);
+        let cool = next(shown.cool);
+        let min = next(span && shown.min);
+        // Room for one column even with all of them off, as narrower leaves no room for the title and settings.
+        Self { avg, hot, max, cool, min, last: x.max(avg + step) }
+    }
+
+    /// Where a core's power goes: the first column of current readings shown.
+    fn power(&self) -> Option<f32> {
+        self.hot.or(self.cool)
     }
 
     fn bar_left(&self) -> f32 {
-        self.avg + 18.0
+        self.last + 18.0
     }
 
     fn bar_right(&self) -> f32 {
@@ -116,7 +133,17 @@ impl Columns {
     }
 
     fn compact_bar(&self) -> f32 {
-        self.avg + COMPACT_BAR_GAP
+        self.last + COMPACT_BAR_GAP
+    }
+}
+
+/// The temperature column headings, at the same anchors as the values below them.
+fn temperature_heads(painter: &egui::Painter, columns: &Columns, at: impl Fn(f32) -> egui::Pos2) {
+    let heads = [(Some(columns.avg), "AVG"), (columns.hot, "HOT"), (columns.max, "MAX"), (columns.cool, "COOL"), (columns.min, "MIN")];
+    for (x, name) in heads {
+        if let Some(x) = x {
+            caps(painter, at(x), Align2::RIGHT_CENTER, name, FAINT);
+        }
     }
 }
 
@@ -484,14 +511,7 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
         let painter = ui.painter();
         let at = |offset: f32| pos2(left + offset, y);
         let columns = self.columns();
-        caps(painter, at(columns.now), Align2::RIGHT_CENTER, "NOW", FAINT);
-        if let Some(x) = columns.min {
-            caps(painter, at(x), Align2::RIGHT_CENTER, "MIN", FAINT);
-        }
-        if let Some(x) = columns.max {
-            caps(painter, at(x), Align2::RIGHT_CENTER, "MAX", FAINT);
-        }
-        caps(painter, at(columns.avg), Align2::RIGHT_CENTER, "AVG", FAINT);
+        temperature_heads(painter, &columns, at);
         caps(painter, at(columns.bar_left()), Align2::LEFT_CENTER, "USAGE", FAINT);
         let span = ui.interact(
             Rect::from_min_max(pos2(left + X_RING, rect.top()), pos2(left + columns.percent(), rect.bottom())),
@@ -502,19 +522,41 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
     }
 
     fn column_help(&self, columns: &Columns) -> String {
-        let mut lines = vec!["NOW: hottest sensor right now"];
-        if is_live(&self.config) {
-            lines.extend(["AVG: mean of the component's sensors right now", "USAGE: usage right now"]);
-        } else {
-            if columns.min.is_some() {
-                lines.push("MIN: lowest NOW got in the selected span");
+        let live = is_live(&self.config);
+        let mut lines = vec![format!("AVG: {AVG_HELP}")];
+        let optional = [
+            ("HOT", columns.hot, HOT_HELP),
+            ("MAX", columns.max, MAX_HELP),
+            ("COOL", columns.cool, COOL_HELP),
+            ("MIN", columns.min, MIN_HELP),
+        ];
+        for (name, x, help) in optional {
+            if x.is_some() {
+                lines.push(format!("{name}: {help}"));
             }
-            if columns.max.is_some() {
-                lines.push("MAX: hottest any sensor got in the selected span");
-            }
-            lines.extend(["AVG: mean of the component's sensors over the span", "USAGE: mean usage over the span"]);
         }
+        lines.push(if live { "USAGE: usage right now" } else { "USAGE: mean usage over the span" }.to_owned());
         lines.join("\n")
+    }
+
+    /// AVG in the primary font, then HOT, MAX, COOL and MIN where shown.
+    #[allow(clippy::too_many_arguments)]
+    fn temperature_cells(
+        &self,
+        painter: &egui::Painter,
+        columns: &Columns,
+        at: impl Fn(f32) -> egui::Pos2,
+        avg: Option<f32>,
+        [hot, max, cool, min]: [Option<f32>; 4],
+        (primary, secondary): (egui::FontId, egui::FontId),
+        tint: impl Fn(Option<f32>) -> Color32,
+    ) {
+        painter.text(at(columns.avg), Align2::RIGHT_CENTER, self.temp(avg), primary, tint(avg));
+        for (x, value) in [(columns.hot, hot), (columns.max, max), (columns.cool, cool), (columns.min, min)] {
+            if let Some(x) = x {
+                painter.text(at(x), Align2::RIGHT_CENTER, self.temp(value), secondary.clone(), tint(value));
+            }
+        }
     }
 
     /// Bar and percentage for a usage series; a dash when there is none.
@@ -583,7 +625,8 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
         let subtitle_rect = painter.text(pos2(left + X_NAME, y + 9.0), Align2::LEFT_CENTER, &subtitle, body(11.0), FAINT);
 
         let high = monitor.stats(component.high, seconds);
-        let avg = monitor.stats(component.avg, seconds);
+        let low = monitor.stats(component.low, seconds);
+        let avg = monitor.latest(component.avg);
         let (warn, critical) = (component.warn, component.critical);
         let ring_center = pos2(left + X_RING, y);
         if let Some(now) = high.now {
@@ -598,14 +641,8 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
         let tint = |value: Option<f32>| value.map_or(FAINT, |v| heat_text(v, warn, critical));
         let columns = self.columns();
         let at = |x: f32| pos2(left + x, y);
-        painter.text(at(columns.now), Align2::RIGHT_CENTER, self.temp(high.now), strong(16.0), tint(high.now));
-        if let Some(x) = columns.min {
-            painter.text(at(x), Align2::RIGHT_CENTER, self.temp(high.low), body(13.5), tint(high.low));
-        }
-        if let Some(x) = columns.max {
-            painter.text(at(x), Align2::RIGHT_CENTER, self.temp(high.high), strong(13.5), tint(high.high));
-        }
-        painter.text(at(columns.avg), Align2::RIGHT_CENTER, self.temp(avg.avg), body(13.5), MUTED);
+        let values = [high.now, high.high, low.now, low.low];
+        self.temperature_cells(painter, &columns, at, avg, values, (strong(16.0), body(13.5)), tint);
 
         let usage = component.usage.and_then(|id| monitor.stats(id, seconds).avg);
         self.usage_cell(ui, rect, usage, 8.0, PURPLE);
@@ -637,14 +674,9 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
         let tint = |value: Option<f32>| value.map_or(FAINT, |v| heat_text(v, warn, critical));
         let columns = self.columns();
         let at = |x: f32| pos2(left + x, y);
-        painter.text(at(columns.now), Align2::RIGHT_CENTER, self.temp(stats.now), strong(12.5), tint(stats.now));
-        if let Some(x) = columns.min {
-            painter.text(at(x), Align2::RIGHT_CENTER, self.temp(stats.low), body(12.5), tint(stats.low));
-        }
-        if let Some(x) = columns.max {
-            painter.text(at(x), Align2::RIGHT_CENTER, self.temp(stats.high), body(12.5), tint(stats.high));
-        }
-        painter.text(at(columns.avg), Align2::RIGHT_CENTER, self.temp(stats.avg), body(12.5), MUTED);
+        // A single sensor's current reading is its own average, hottest and coolest.
+        let values = [stats.now, stats.high, stats.now, stats.low];
+        self.temperature_cells(painter, &columns, at, stats.now, values, (strong(12.5), body(12.5)), tint);
 
         if let Some(usage) = row.usage {
             let value = monitor.stats(usage, seconds).avg;
@@ -664,14 +696,16 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
         let at = |offset: f32| pos2(left + offset, y);
         caps(painter, at(X_NAME + 12.0), Align2::LEFT_CENTER, "CORE", FAINT);
         let columns = self.columns();
-        caps(painter, at(columns.now), Align2::RIGHT_CENTER, "CLOCK", FAINT);
-        if let Some(x) = columns.min {
-            caps(painter, at(x), Align2::RIGHT_CENTER, "LOW", FAINT);
-        }
+        caps(painter, at(columns.avg), Align2::RIGHT_CENTER, "CLOCK", FAINT);
         if let Some(x) = columns.max {
             caps(painter, at(x), Align2::RIGHT_CENTER, "PEAK", FAINT);
         }
-        caps(painter, at(columns.avg), Align2::RIGHT_CENTER, "POWER", FAINT);
+        if let Some(x) = columns.min {
+            caps(painter, at(x), Align2::RIGHT_CENTER, "LOW", FAINT);
+        }
+        if let Some(x) = columns.power() {
+            caps(painter, at(x), Align2::RIGHT_CENTER, "POWER", FAINT);
+        }
     }
 
     fn core_row(&mut self, ui: &mut Ui, width: f32, monitor: &Monitor, core: &Core) {
@@ -687,15 +721,17 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
         let power = core.power.and_then(|id| monitor.latest(id));
         let columns = self.columns();
         let at = |x: f32| pos2(left + x, y);
-        painter.text(at(columns.now), Align2::RIGHT_CENTER, frequency(clock.now), body(12.0), TEXT);
-        if let Some(x) = columns.min {
-            painter.text(at(x), Align2::RIGHT_CENTER, frequency(clock.low), body(12.0), MUTED);
-        }
+        painter.text(at(columns.avg), Align2::RIGHT_CENTER, frequency(clock.now), body(12.0), TEXT);
         if let Some(x) = columns.max {
             painter.text(at(x), Align2::RIGHT_CENTER, frequency(clock.high), body(12.0), MUTED);
         }
-        let power = power.map_or("—".to_owned(), |w| format!("{w:.1} W"));
-        painter.text(at(columns.avg), Align2::RIGHT_CENTER, power, body(12.0), MUTED);
+        if let Some(x) = columns.min {
+            painter.text(at(x), Align2::RIGHT_CENTER, frequency(clock.low), body(12.0), MUTED);
+        }
+        if let Some(x) = columns.power() {
+            let power = power.map_or("—".to_owned(), |w| format!("{w:.1} W"));
+            painter.text(at(x), Align2::RIGHT_CENTER, power, body(12.0), MUTED);
+        }
 
         let usage = monitor.stats(core.usage, seconds).avg;
         self.usage_cell(ui, rect, usage, 5.0, PURPLE.gamma_multiply(0.8));
@@ -739,13 +775,27 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
             }
             x += chip_width + 6.0;
         }
-        let note = pos2(controls.right() - PAD, controls.top() + 18.5);
-        ui.painter().text(note, Align2::RIGHT_CENTER, "Solid: temperature    Dashed: usage", body(11.0), FAINT);
-
         let (rect, _) = ui.allocate_exact_size(vec2(width, GRAPH_PLOT_H), Sense::hover());
         let rect = rect.shrink2(vec2(PAD - 8.0, 0.0));
         let seconds = self.config.window_seconds.max(MIN_GRAPH_SECONDS);
         let lines = self.graph_lines(monitor, seconds, rect.width() as usize);
+
+        // The key names only the kinds of line on the graph right now, and only when
+        // there is more than one kind to tell apart.
+        let components = self.visible(monitor).iter().any(|c| self.is_graphed(&c.key));
+        let metrics = &self.config.metrics;
+        let key: Vec<&str> = [
+            (components && metrics.high, "Solid: high"),
+            (components && metrics.avg, "Faded: average"),
+            (lines.iter().any(|line| line.is_usage), "Dashed: usage"),
+        ]
+        .into_iter()
+        .filter_map(|(shown, text)| shown.then_some(text))
+        .collect();
+        if key.len() > 1 {
+            let note = pos2(controls.right() - PAD, controls.top() + 18.5);
+            ui.painter().text(note, Align2::RIGHT_CENTER, key.join("    "), body(11.0), FAINT);
+        }
         let fahrenheit = self.config.fahrenheit;
         graph::draw(ui, rect, &lines, seconds, |c| Self::format_temp(fahrenheit, c));
     }
@@ -775,14 +825,7 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
         let painter = ui.painter();
         let y = head.center().y + 1.0;
         let at = |x: f32| pos2(left + x, y);
-        caps(painter, at(columns.now), Align2::RIGHT_CENTER, "NOW", FAINT);
-        if let Some(x) = columns.min {
-            caps(painter, at(x), Align2::RIGHT_CENTER, "MIN", FAINT);
-        }
-        if let Some(x) = columns.max {
-            caps(painter, at(x), Align2::RIGHT_CENTER, "MAX", FAINT);
-        }
-        caps(painter, at(columns.avg), Align2::RIGHT_CENTER, "AVG", FAINT);
+        temperature_heads(painter, &columns, at);
         caps(painter, at(columns.compact_bar()), Align2::LEFT_CENTER, "USAGE", FAINT);
 
         for component in self.visible(monitor) {
@@ -791,20 +834,15 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
             let painter = ui.painter();
             let (warn, critical) = (component.warn, component.critical);
             let high = monitor.stats(component.high, seconds);
-            let avg = monitor.stats(component.avg, seconds).avg;
+            let low = monitor.stats(component.low, seconds);
+            let avg = monitor.latest(component.avg);
             let tint = |value: Option<f32>| value.map_or(FAINT, |v| heat_text(v, warn, critical));
 
             let name = component.title.to_uppercase();
             painter.text(pos2(left, y), Align2::LEFT_CENTER, name, strong(11.5), MUTED);
             let at = |x: f32| pos2(left + x, y);
-            painter.text(at(columns.now), Align2::RIGHT_CENTER, self.temp(high.now), strong(14.0), tint(high.now));
-            if let Some(x) = columns.min {
-                painter.text(at(x), Align2::RIGHT_CENTER, self.temp(high.low), body(12.5), tint(high.low));
-            }
-            if let Some(x) = columns.max {
-                painter.text(at(x), Align2::RIGHT_CENTER, self.temp(high.high), strong(12.5), tint(high.high));
-            }
-            painter.text(at(columns.avg), Align2::RIGHT_CENTER, self.temp(avg), body(12.5), MUTED);
+            let values = [high.now, high.high, low.now, low.low];
+            self.temperature_cells(painter, &columns, at, avg, values, (strong(14.0), body(12.5)), tint);
 
             let bar_left = left + columns.compact_bar();
             let bar = Rect::from_min_max(pos2(bar_left, y - 8.0), pos2(rect.right() - PAD, y + 8.0));

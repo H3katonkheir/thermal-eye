@@ -18,17 +18,23 @@ impl Default for Metrics {
     }
 }
 
-/// The table columns that can be hidden to save room.
+/// The temperature columns that can be hidden to save room. AVG always shows.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Columns {
-    pub min: bool,
+    /// Hottest reading right now.
+    pub hot: bool,
+    /// Hottest reading in the span.
     pub max: bool,
+    /// Coolest reading right now.
+    pub cool: bool,
+    /// Coolest reading in the span.
+    pub min: bool,
 }
 
 impl Default for Columns {
     fn default() -> Self {
-        Self { min: true, max: true }
+        Self { hot: true, max: true, cool: false, min: false }
     }
 }
 
@@ -48,6 +54,8 @@ pub struct Config {
     /// Components and sensors drawn on the graph.
     pub graphed: Vec<String>,
     pub metrics: Metrics,
+    /// Renamed from `columns` when MIN and MAX changed meaning, so old choices are not misread.
+    #[serde(rename = "temperature_columns")]
     pub columns: Columns,
     pub hidden: Vec<String>,
     /// Show the hottest reading in the notification area.

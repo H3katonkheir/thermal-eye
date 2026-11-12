@@ -19,7 +19,7 @@
 
 ## What it does
 
-- **Every component in one place:** current, min, max and average temperature, plus
+- **Every component in one place:** average, hottest and coolest temperature, plus
   average usage, for your CPU, graphics card, RAM, drives and motherboard.
 - **History graph:** use the dot at the end of a row to plot it, from whole components
   down to a single core or sensor, over anything from the last minute to the last 24 hours.
@@ -67,18 +67,20 @@ in case other apps use it, and can be removed the same way.
 
 | Column | Meaning |
 | --- | --- |
-| **Now** | The hottest of the component's sensors right now |
-| **Min** | The lowest Now got during the selected span |
+| **Avg** | The mean of the component's sensors right now |
+| **Hot** | The hottest of its sensors right now |
 | **Max** | The hottest any of its sensors got during the selected span |
-| **Avg** | The mean of its sensors over the selected span |
+| **Cool** | The coolest of its sensors right now |
+| **Min** | The coolest any of its sensors got during the selected span |
 | **Usage** | Mean usage over the selected span |
 
 The span selector, from Live to 24h, controls these figures and the graph together.
-Live has no span, so it leaves out Min and Max. To save room, either can be hidden
-under **Show columns** in Settings, and the window narrows to match.
+Live has no span, so Usage shows the current reading and Max and Min are left out. Avg
+always shows; the others can be turned on or off under **Show columns** in Settings
+(Hot and Max are on at first), and the window narrows to match.
 History is kept in memory, so it starts again when the app closes.
 
-- **CPU temperature:** Max includes Tctl, the value your fans follow. Avg uses only
+- **CPU temperature:** Hot and Max include Tctl, the value your fans follow. Avg uses only
   the die sensors, because Tctl can read well above them.
 - **Core temperature:** Ryzen CPUs report temperature per die rather than per core, so
   it appears on the CCD rows, and core rows show clock, power and usage instead.

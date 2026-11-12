@@ -113,6 +113,8 @@ pub struct Component {
     pub subtitle: String,
     /// Hottest sensor at each sample.
     pub high: SeriesId,
+    /// Coolest sensor at each sample.
+    pub low: SeriesId,
     /// Mean of the component's sensors at each sample.
     pub avg: SeriesId,
     pub usage: Option<SeriesId>,
@@ -152,6 +154,7 @@ pub enum Link {
 
 enum Rule {
     Max(Vec<SeriesId>),
+    Min(Vec<SeriesId>),
     Mean(Vec<SeriesId>),
     Sum(Vec<SeriesId>),
 }
@@ -164,11 +167,12 @@ struct Derived {
 impl Derived {
     fn compute(&self, history: &History) -> f32 {
         let inputs = match &self.rule {
-            Rule::Max(ids) | Rule::Mean(ids) | Rule::Sum(ids) => ids,
+            Rule::Max(ids) | Rule::Min(ids) | Rule::Mean(ids) | Rule::Sum(ids) => ids,
         };
         let values = inputs.iter().map(|&id| history.pending(id)).filter(|v| !v.is_nan());
         match self.rule {
             Rule::Max(_) => values.fold(f32::NAN, f32::max),
+            Rule::Min(_) => values.fold(f32::NAN, f32::min),
             Rule::Sum(_) => values.fold(f32::NAN, |a, v| if a.is_nan() { v } else { a + v }),
             Rule::Mean(_) => {
                 let (sum, count) = values.fold((0.0, 0), |(s, n), v| (s + v, n + 1));
@@ -386,7 +390,8 @@ impl<'a> Builder<'a> {
         let hot = [die_series.as_slice(), &other_series].concat();
         let mean = if die_series.is_empty() { other_series } else { die_series };
 
-        let high = self.derive("cpu/high", Rule::Max(hot));
+        let high = self.derive("cpu/high", Rule::Max(hot.clone()));
+        let low = self.derive("cpu/low", Rule::Min(hot));
         let avg = self.derive("cpu/avg", Rule::Mean(mean));
         let usage = self.find(hw, "Load", "CPU Total");
         let extras = [
@@ -399,6 +404,7 @@ impl<'a> Builder<'a> {
             title: "CPU".into(),
             subtitle: short_cpu_name(&hw.name),
             high,
+            low,
             avg,
             usage,
             warn: 85.0,
@@ -501,6 +507,7 @@ impl<'a> Builder<'a> {
             let temps: Vec<_> = rows.iter().filter_map(|row| row.temp).collect();
             let key = format!("gpu{index}");
             let high = self.derive(&format!("{key}/high"), Rule::Max(temps.clone()));
+            let low = self.derive(&format!("{key}/low"), Rule::Min(temps.clone()));
             let avg = self.derive(&format!("{key}/avg"), Rule::Mean(temps));
             let usage = self.find(hw, "Load", "GPU Core").or_else(|| self.find(hw, "Load", "D3D 3D"));
 
@@ -523,6 +530,7 @@ impl<'a> Builder<'a> {
                 title: if gpus.len() > 1 { format!("GPU {}", index + 1) } else { "GPU".into() },
                 subtitle: hw.name.replace("AMD Radeon ", "").replace("NVIDIA GeForce ", ""),
                 high,
+                low,
                 avg,
                 usage,
                 warn: 90.0,
@@ -553,6 +561,7 @@ impl<'a> Builder<'a> {
 
         let temps: Vec<_> = rows.iter().filter_map(|row| row.temp).collect();
         let high = self.derive("ram/high", Rule::Max(temps.clone()));
+        let low = self.derive("ram/low", Rule::Min(temps.clone()));
         let avg = self.derive("ram/avg", Rule::Mean(temps));
         let usage = self.find(total_hw, "Load", "Memory");
 
@@ -578,6 +587,7 @@ impl<'a> Builder<'a> {
             title: "RAM".into(),
             subtitle,
             high,
+            low,
             avg,
             usage,
             warn: 55.0,
@@ -614,6 +624,7 @@ impl<'a> Builder<'a> {
 
         let temps: Vec<_> = rows.iter().filter_map(|row| row.temp).collect();
         let high = self.derive("storage/high", Rule::Max(temps.clone()));
+        let low = self.derive("storage/low", Rule::Min(temps.clone()));
         let avg = self.derive("storage/avg", Rule::Mean(temps));
         let usage = (!activity.is_empty()).then(|| self.derive("storage/usage", Rule::Mean(activity)));
         self.components.push(Component {
@@ -622,6 +633,7 @@ impl<'a> Builder<'a> {
             title: "Storage".into(),
             subtitle: format!("{} drives", drives.len()),
             high,
+            low,
             avg,
             usage,
             warn: 60.0,
@@ -665,6 +677,7 @@ impl<'a> Builder<'a> {
         }
 
         let high = self.derive("system/high", Rule::Max(counted.clone()));
+        let low = self.derive("system/low", Rule::Min(counted.clone()));
         let avg = self.derive("system/avg", Rule::Mean(counted));
         self.components.push(Component {
             key: "system".into(),
@@ -672,6 +685,7 @@ impl<'a> Builder<'a> {
             title: "System".into(),
             subtitle: board.replace("Gigabyte ", ""),
             high,
+            low,
             avg,
             usage: None,
             warn: 70.0,

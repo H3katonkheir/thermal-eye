@@ -47,7 +47,7 @@ pub struct Config {
     pub graph_open: bool,
     /// The note under the graph on how to choose its lines has been closed.
     pub graph_tip_dismissed: bool,
-    /// Span of the high, average and usage figures, and of the graph.
+    /// Span of the MAX and MIN figures, and of the graph.
     pub window_seconds: u32,
     /// Components showing their sensors.
     pub expanded: Vec<String>,

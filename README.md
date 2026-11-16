@@ -20,8 +20,8 @@
 ## What it does
 
 - **Every component in one place:** average temperature, the hottest and coolest
-  sensors now and over time, and average usage, for your CPU, graphics card, RAM,
-  drives and motherboard.
+  sensors now and over time, and current usage, for your CPU, graphics card, RAM,
+  drives and motherboard. Each drive also shows its used and free space.
 - **History graph:** use the dot at the end of a row to plot it, from whole components
   down to a single core or sensor, over anything from the last minute to the last 24 hours.
 - **Every core:** open the CPU row to see each core's clock, power, peak, low and usage,
@@ -73,10 +73,10 @@ in case other apps use it, and can be removed the same way.
 | **Max** | The hottest any of its sensors got during the selected span |
 | **Cool** | The coolest of its sensors right now |
 | **Min** | The coolest any of its sensors got during the selected span |
-| **Usage** | Mean usage over the selected span |
+| **Usage** | Usage right now |
 
-The span selector, from Live to 24h, controls these figures and the graph together.
-Live has no span, so Usage shows the current reading and Max and Min are left out. Avg
+The span selector, from Live to 24h, controls Max, Min and the graph together. Live has
+no span, so Max and Min are left out. Avg
 always shows; the others can be turned on or off under **Show columns** in Settings
 (Hot and Max are on at first), and the window narrows to match.
 History is kept in memory, so it starts again when the app closes.
@@ -87,6 +87,8 @@ History is kept in memory, so it starts again when the app closes.
   it appears on the CCD rows, and core rows show clock, power and usage instead.
 - **Clock speeds:** these are effective clocks, so idle cores read in MHz.
 - **Core usage:** the mean of the core's two threads, so one busy thread reads about 50%.
+- **Drive usage:** how busy the drive is reading and writing, as in Task Manager. The
+  Storage row shows the busiest drive, not how full the drives are.
 - **Motherboard sensors:** the CPU socket sensor is listed, but left out of the System
   figures so that row doesn't just repeat the CPU. Boards the app has no labels for
   show generic names such as `Temperature 1`.

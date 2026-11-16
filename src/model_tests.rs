@@ -123,12 +123,17 @@ fn ram_shows_only_dimm_readings_and_adopts_the_limits_they_report() {
 }
 
 #[test]
-fn storage_ignores_threshold_sensors_and_averages_drive_activity() {
+fn storage_ignores_threshold_sensors_and_shows_the_busiest_drive() {
     let mut monitor = monitor();
-    sample(&mut monitor, &[("/nvme/3/load/53", 40.0), ("/hdd/1/load/53", 20.0)]);
+    sample(&mut monitor, &[
+        ("/nvme/3/load/53", 95.0),
+        ("/hdd/1/load/53", 0.0),
+        ("/hdd/2/load/53", 0.0),
+        ("/ssd/0/load/53", 0.0),
+    ]);
     let storage = component(&monitor, "storage");
     assert!(!storage.rows.iter().any(|r| r.key.contains("temperature/10")));
-    assert_eq!(monitor.latest(storage.usage.unwrap()), Some(30.0));
+    assert_eq!(monitor.latest(storage.usage.unwrap()), Some(95.0));
 }
 
 #[test]

@@ -645,6 +645,26 @@ fn hovering_text_that_fits_adds_nothing() {
 }
 
 #[test]
+fn each_drive_shows_its_used_and_free_space_under_it() {
+    let mut widget = Harness::new(Config { expanded: vec!["storage".into()], ..Config::default() });
+    // Every sensor reads 45, so each drive has 45 GB in total and 45 GB free.
+    widget.frame(Vec::new());
+    assert!(widget.shows("0 / 45 GB used · 45 GB free"));
+}
+
+#[test]
+fn usage_shows_the_latest_reading_not_the_span_average() {
+    let mut widget = Harness::new(Config { expanded: vec!["storage".into()], ..Config::default() });
+    {
+        let mut monitor = widget.monitor.lock().unwrap();
+        let count = SCHEMA.split(|&b| b == b'"').filter(|part| *part == b"kind").count();
+        monitor.ingest(serde_json::json!({ "t": "values", "v": vec![90.0; count] }).to_string().as_bytes());
+    }
+    widget.frame(Vec::new());
+    assert!(widget.shows("90%"), "five samples at 45% and one at 90% average to 52%");
+}
+
+#[test]
 fn a_shortened_sensor_name_also_shows_in_full() {
     let mut widget = Harness::new(Config { expanded: vec!["storage".into()], ..Config::default() });
     widget.monitor.lock().unwrap().components[3].rows[1].label = "A drive with a really very long model name".into();
@@ -756,7 +776,7 @@ fn stopped_fans_are_hidden_but_a_gpu_in_zero_rpm_mode_is_not() {
     monitor.history.commit();
     let reading = |label: &str| Extra::Reading { label: label.into(), series: id, unit: Unit::Rpm };
     system.extras = vec![reading("Sys fan 3"), reading("Fan")];
-    assert_eq!(extra_values(&monitor, &system), [("Fan".to_owned(), "0 RPM".to_owned())]);
+    assert_eq!(extra_values(&monitor, &system.extras), [("Fan".to_owned(), "0 RPM".to_owned())]);
 }
 
 

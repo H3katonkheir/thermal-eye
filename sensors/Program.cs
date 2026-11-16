@@ -88,6 +88,9 @@ static class Helper
             IsMotherboardEnabled = true, IsStorageEnabled = true,
         };
         computer.Open();
+        // Drive activity is a delta from the previous read; the first read compares
+        // against zero and reports every drive 100% busy, so take it and throw it away.
+        foreach (var h in computer.Hardware) Update(h);
         return computer;
     }
 

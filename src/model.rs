@@ -63,6 +63,8 @@ pub struct Row {
     pub label: String,
     pub temp: Option<SeriesId>,
     pub usage: Option<SeriesId>,
+    /// Shown on a line of their own under the row.
+    pub extras: Vec<Extra>,
 }
 
 #[derive(Clone, Debug)]
@@ -94,6 +96,8 @@ pub enum Extra {
     Reading { label: String, series: SeriesId, unit: Unit },
     /// Used and total, with the factor that converts them to gigabytes.
     Capacity { label: String, used: SeriesId, total: SeriesId, to_gb: f32 },
+    /// A drive's used and free space, both in gigabytes.
+    Space { free: SeriesId, total: SeriesId },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -355,6 +359,7 @@ impl<'a> Builder<'a> {
             label,
             temp: Some(self.history.id(&sensor.id)),
             usage: None,
+            extras: Vec::new(),
         }
     }
 
@@ -441,6 +446,7 @@ impl<'a> Builder<'a> {
                 label: format!("CCD{number}"),
                 temp: None,
                 usage: None,
+                extras: Vec::new(),
             });
             row.usage = Some(usage);
 
@@ -610,6 +616,10 @@ impl<'a> Builder<'a> {
             let name = hw.name.trim();
             let drive_usage = self.find(hw, "Load", "Total Activity");
             activity.extend(drive_usage);
+            let free = self.find(hw, "Data", "Free Space");
+            let total = self.find(hw, "Data", "Total Space");
+            let space: Vec<_> = free.zip(total).map(|(free, total)| Extra::Space { free, total }).into_iter().collect();
+            let first = rows.len();
             let temps = self
                 .of(hw)
                 .into_iter()
@@ -620,18 +630,23 @@ impl<'a> Builder<'a> {
                 row.usage = if index == 0 { drive_usage } else { None };
                 rows.push(row);
             }
+            // Under the drive's last row, so it doesn't split a drive's sensors.
+            if rows.len() > first {
+                rows.last_mut().unwrap().extras = space;
+            }
         }
 
         let temps: Vec<_> = rows.iter().filter_map(|row| row.temp).collect();
         let high = self.derive("storage/high", Rule::Max(temps.clone()));
         let low = self.derive("storage/low", Rule::Min(temps.clone()));
         let avg = self.derive("storage/avg", Rule::Mean(temps));
-        let usage = (!activity.is_empty()).then(|| self.derive("storage/usage", Rule::Mean(activity)));
+        // The busiest drive, as Task Manager shows it: a mean lets idle drives hide a saturated one.
+        let usage = (!activity.is_empty()).then(|| self.derive("storage/usage", Rule::Max(activity)));
         self.components.push(Component {
             key: "storage".into(),
             kind: Kind::Storage,
             title: "Storage".into(),
-            subtitle: format!("{} drives", drives.len()),
+            subtitle: format!("{} drive{}", drives.len(), if drives.len() == 1 { "" } else { "s" }),
             high,
             low,
             avg,

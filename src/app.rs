@@ -277,6 +277,10 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
             }
             for row in component.rows.iter().filter(|r| has_data(r)) {
                 items.push(Item::Sensor { component, row, note: None, die: false });
+                let extras = extra_values(monitor, &row.extras);
+                if !extras.is_empty() {
+                    items.push(Item::Extras(extras));
+                }
             }
             for die in &component.dies {
                 let note = die.note.as_deref();
@@ -284,7 +288,7 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
                 items.push(Item::CoreHead);
                 items.extend(die.cores.iter().map(|core| Item::Core(core)));
             }
-            let extras = extra_values(monitor, component);
+            let extras = extra_values(monitor, &component.extras);
             if !extras.is_empty() {
                 items.push(Item::Extras(extras));
             }
@@ -522,7 +526,6 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
     }
 
     fn column_help(&self, columns: &Columns) -> String {
-        let live = is_live(&self.config);
         let mut lines = vec![format!("AVG: {AVG_HELP}")];
         let optional = [
             ("HOT", columns.hot, HOT_HELP),
@@ -535,7 +538,7 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
                 lines.push(format!("{name}: {help}"));
             }
         }
-        lines.push(if live { "USAGE: usage right now" } else { "USAGE: mean usage over the span" }.to_owned());
+        lines.push("USAGE: usage right now".to_owned());
         lines.join("\n")
     }
 
@@ -644,7 +647,7 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
         let values = [high.now, high.high, low.now, low.low];
         self.temperature_cells(painter, &columns, at, avg, values, (strong(16.0), body(13.5)), tint);
 
-        let usage = component.usage.and_then(|id| monitor.stats(id, seconds).avg);
+        let usage = component.usage.and_then(|id| monitor.latest(id));
         self.usage_cell(ui, rect, usage, 8.0, PURPLE);
         self.graph_dot(ui, rect, &component.key, component_color(component.kind));
         show_full_text(ui, &response, subtitle_rect, &subtitle, &component.subtitle);
@@ -679,7 +682,7 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
         self.temperature_cells(painter, &columns, at, stats.now, values, (strong(12.5), body(12.5)), tint);
 
         if let Some(usage) = row.usage {
-            let value = monitor.stats(usage, seconds).avg;
+            let value = monitor.latest(usage);
             self.usage_cell(ui, rect, value, 5.0, PURPLE.gamma_multiply(0.8));
         }
         let color = self.series_color(&row.key);
@@ -733,7 +736,7 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
             painter.text(at(x), Align2::RIGHT_CENTER, power, body(12.0), MUTED);
         }
 
-        let usage = monitor.stats(core.usage, seconds).avg;
+        let usage = monitor.latest(core.usage);
         self.usage_cell(ui, rect, usage, 5.0, PURPLE.gamma_multiply(0.8));
         let color = self.series_color(&core.key);
         self.graph_dot(ui, rect, &core.key, color);
@@ -846,7 +849,7 @@ Danger from {}", self.temp(Some(warn)), self.temp(Some(critical)))
 
             let bar_left = left + columns.compact_bar();
             let bar = Rect::from_min_max(pos2(bar_left, y - 8.0), pos2(rect.right() - PAD, y + 8.0));
-            match component.usage.and_then(|id| monitor.stats(id, seconds).avg) {
+            match component.usage.and_then(|id| monitor.latest(id)) {
                 Some(usage) => {
                     painter.rect_filled(bar, 4.0, TRACK);
                     let fill = bar.width() * (usage / 100.0).clamp(0.0, 1.0);
@@ -1078,9 +1081,8 @@ fn elide(text: &str, limit: usize) -> String {
 
 /// Label and formatted value of each extra reading that currently has one.
 /// Fan headers reading 0 RPM are skipped: most have nothing plugged in.
-fn extra_values(monitor: &Monitor, component: &Component) -> Vec<(String, String)> {
-    component
-        .extras
+fn extra_values(monitor: &Monitor, extras: &[Extra]) -> Vec<(String, String)> {
+    extras
         .iter()
         .filter_map(|extra| match extra {
             Extra::Reading { label, series, unit } => {
@@ -1096,6 +1098,10 @@ fn extra_values(monitor: &Monitor, component: &Component) -> Vec<(String, String
             Extra::Capacity { label, used, total, to_gb } => {
                 let (used, total) = (monitor.latest(*used)?, monitor.latest(*total)?);
                 Some((label.clone(), format!("{:.1} / {:.1} GB", used * to_gb, total * to_gb)))
+            }
+            Extra::Space { free, total } => {
+                let (free, total) = (monitor.latest(*free)?, monitor.latest(*total)?);
+                Some(("Space".to_owned(), format!("{:.0} / {total:.0} GB used · {free:.0} GB free", total - free)))
             }
         })
         .collect()
